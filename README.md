@@ -2,7 +2,18 @@
 
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for generating parametric 3D-printable models using [CadQuery](https://cadquery.readthedocs.io/). Describe a physical object, and Claude will write a parametric script, export STL, render previews, and iterate with you until it's right.
 
+<p align="center">
+  <img src="docs/photo_stand_case.jpg" alt="3D-printed MagSafe stand and iPhone case designed with Claude" width="600">
+</p>
+
 Read the full write-up: [I Taught Claude to Design 3D-Printable Parts. Here's How](https://medium.com/TODO)
+
+### Examples
+
+<p align="center">
+  <img src="docs/magsafe_stand_preview.png" alt="MagSafe stand preview — 4 views" width="480">
+  <img src="docs/iphone12_case_preview.png" alt="iPhone 13 Pro case preview — 4 views" width="480">
+</p>
 
 ## Installation
 
