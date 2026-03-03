@@ -2,5 +2,12 @@
 __pycache__/
 *.pyc
 *.stl
+*.3mf
 *_preview.png
 press/
+
+# Example models (not part of the skill)
+iphone12_case.py
+magsafe_stand.py
+phone_stand.py
+geometric_planter.py

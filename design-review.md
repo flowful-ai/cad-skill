@@ -17,7 +17,7 @@ After generating a model, ALWAYS run the preview-analyze-iterate loop before del
 
 ```bash
 # Install dependencies (first time only)
-pip install numpy-stl matplotlib
+pip install trimesh pyrender Pillow
 
 # Generate multi-view preview
 python3 preview.py model.stl preview.png --views multi
@@ -125,7 +125,7 @@ assert abs(bb.xlen - expected_width) < 0.1, f"Width mismatch: {bb.xlen} vs {expe
 ### Overhang Detection (Approximate)
 
 ```python
-from stl import mesh as stl_mesh
+import trimesh
 import numpy as np
 
 def check_overhangs(stl_path, max_angle=45):
@@ -137,31 +137,30 @@ def check_overhangs(stl_path, max_angle=45):
 
     Returns percentage of total faces that may need supports.
     """
-    m = stl_mesh.Mesh.from_file(stl_path)
+    tm = trimesh.load(stl_path, force="mesh")
+    normals = tm.face_normals
+
+    # Only check downward-facing normals (potential overhangs)
+    downward = normals[:, 2] < 0
+    if not downward.any():
+        return 0.0
 
     down = np.array([0, 0, -1])
+    down_normals = normals[downward]
 
-    problem_faces = 0
-    total_downward = 0
+    # Angle between each normal and straight-down vector
+    cos_angles = np.dot(down_normals, down) / (
+        np.linalg.norm(down_normals, axis=1) + 1e-10
+    )
+    angles_from_down = np.degrees(np.arccos(np.clip(cos_angles, -1, 1)))
 
-    for normal in m.normals:
-        # Only check downward-facing normals (potential overhangs)
-        if normal[2] < 0:
-            total_downward += 1
-            # Angle between normal and straight-down vector
-            cos_angle = np.dot(normal, down) / (np.linalg.norm(normal) + 1e-10)
-            angle_from_down = np.degrees(np.arccos(np.clip(cos_angle, -1, 1)))
-            # angle_from_down=0 means flat bottom (safe)
-            # angle_from_down=90 means vertical face (safe)
-            # Overhang angle from horizontal = 90 - angle_from_down
-            # Problem when overhang angle > max_angle
-            overhang_from_horizontal = 90 - angle_from_down
-            if overhang_from_horizontal > max_angle:
-                problem_faces += 1
+    # angle_from_down=0 means flat bottom (safe)
+    # angle_from_down=90 means vertical face (safe)
+    # Overhang angle from horizontal = 90 - angle_from_down
+    overhang_from_horizontal = 90 - angles_from_down
+    problem_faces = np.sum(overhang_from_horizontal > max_angle)
 
-    if total_downward == 0:
-        return 0.0
-    return problem_faces / len(m.normals) * 100
+    return problem_faces / len(normals) * 100
 
 pct = check_overhangs("model.stl")
 if pct > 5:

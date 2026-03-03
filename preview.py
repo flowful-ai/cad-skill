@@ -8,134 +8,398 @@ Usage:
     python3 preview.py model.stl --views iso      # single isometric (default)
 
 Dependencies:
-    pip install numpy-stl matplotlib
+    pip install trimesh pyrender Pillow
 """
 import sys
 import os
 import argparse
+import math
 import numpy as np
-from stl import mesh
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+# Pyrender needs an OpenGL context for offscreen rendering.
+# On Linux set PYOPENGL_PLATFORM=egl (GPU) or osmesa (CPU) before import.
+# On macOS the default CGL/pyglet backend works — do NOT set egl/osmesa.
+import platform as _plat
+if _plat.system() == "Linux" and "PYOPENGL_PLATFORM" not in os.environ:
+    os.environ["PYOPENGL_PLATFORM"] = "egl"
+
+import trimesh
+import pyrender
+from PIL import Image, ImageDraw, ImageFont
 
 
-def load_stl(path):
-    """Load STL and return mesh object. Exits on failure."""
+# ---------------------------------------------------------------------------
+# Mesh loading
+# ---------------------------------------------------------------------------
+
+def load_mesh(path):
+    """Load an STL file via trimesh. Exits on failure."""
     try:
-        stl_mesh = mesh.Mesh.from_file(path)
+        tm = trimesh.load(path, force="mesh")
     except Exception as e:
         print(f"ERROR: Failed to load STL: {e}")
         sys.exit(1)
-    if len(stl_mesh.vectors) == 0:
-        print("ERROR: STL file contains no triangles")
+    if not hasattr(tm, "vertices") or len(tm.vertices) == 0:
+        print("ERROR: STL file contains no geometry")
         sys.exit(1)
-    return stl_mesh
+    return tm
 
 
-def get_bounds(stl_mesh):
-    """Get bounding box of mesh."""
-    mins = np.array([stl_mesh.x.min(), stl_mesh.y.min(), stl_mesh.z.min()])
-    maxs = np.array([stl_mesh.x.max(), stl_mesh.y.max(), stl_mesh.z.max()])
-    center = (mins + maxs) / 2
-    size = maxs - mins
-    return mins, maxs, center, size
+# ---------------------------------------------------------------------------
+# Scene + camera helpers
+# ---------------------------------------------------------------------------
+
+def _rotation_matrix(elev_deg, azim_deg):
+    """Build a camera-pose matrix from elevation and azimuth (degrees).
+
+    Convention:
+        azim  = rotation around Z (world up)
+        elev  = rotation above the XY plane
+    Returns a 4x4 camera pose (OpenGL: -Z forward, +Y up).
+    """
+    elev = math.radians(elev_deg)
+    azim = math.radians(azim_deg)
+
+    # Camera position on a unit sphere
+    cx = math.cos(elev) * math.cos(azim)
+    cy = math.cos(elev) * math.sin(azim)
+    cz = math.sin(elev)
+    eye = np.array([cx, cy, cz])
+
+    # Look-at
+    target = np.array([0.0, 0.0, 0.0])
+    up = np.array([0.0, 0.0, 1.0])
+
+    forward = target - eye
+    forward /= np.linalg.norm(forward)
+    right = np.cross(forward, up)
+    if np.linalg.norm(right) < 1e-6:
+        # Degenerate case (looking straight down/up)
+        up = np.array([0.0, 1.0, 0.0])
+        right = np.cross(forward, up)
+    right /= np.linalg.norm(right)
+    cam_up = np.cross(right, forward)
+
+    # Build OpenGL camera matrix (‑Z forward)
+    pose = np.eye(4)
+    pose[0:3, 0] = right
+    pose[0:3, 1] = cam_up
+    pose[0:3, 2] = -forward
+    pose[0:3, 3] = eye
+    return pose
 
 
-def set_equal_aspect(ax, mins, maxs):
-    """Force equal aspect ratio on 3D axes so the model isn't distorted."""
-    ranges = maxs - mins
-    max_range = ranges.max()
-    center = (mins + maxs) / 2
-    margin = max_range * 0.15
-    half = max_range / 2 + margin
-    ax.set_xlim(center[0] - half, center[0] + half)
-    ax.set_ylim(center[1] - half, center[1] + half)
-    ax.set_zlim(center[2] - half, center[2] + half)
+def _nice_spacing(extent):
+    """Pick a human-friendly grid spacing that gives ~8-12 lines."""
+    target = extent / 10
+    for s in [1, 2, 5, 10, 20, 50, 100, 200]:
+        if s >= target:
+            return s
+    return 200
 
 
-def setup_3d_axes(ax, stl_mesh, elev, azim, title=None):
-    """Configure a 3D axes with the mesh rendered."""
-    polygons = Poly3DCollection(stl_mesh.vectors, alpha=0.85)
-    polygons.set_facecolor([0.55, 0.70, 0.88])
-    polygons.set_edgecolor([0.3, 0.3, 0.3])
-    polygons.set_linewidth(0.1)
-    ax.add_collection3d(polygons)
+def _build_grid(tm):
+    """Create a ground-plane grid mesh at the bottom of the object.
 
-    mins, maxs, center, size = get_bounds(stl_mesh)
-    set_equal_aspect(ax, mins, maxs)
-    ax.view_init(elev=elev, azim=azim)
+    Returns (ground_plane_trimesh, grid_lines_trimesh).
+    """
+    bounds = tm.bounds  # shape (2, 3): [[min_x,y,z], [max_x,y,z]]
+    z_floor = bounds[0][2]
+    cx, cy = tm.bounding_box.centroid[:2]
 
-    ax.set_xlabel('X (mm)', fontsize=8)
-    ax.set_ylabel('Y (mm)', fontsize=8)
-    ax.set_zlabel('Z (mm)', fontsize=8)
-    ax.tick_params(labelsize=7)
+    extent = max(bounds[1][0] - bounds[0][0], bounds[1][1] - bounds[0][1])
+    spacing = _nice_spacing(extent)
+    pad = extent * 0.5
 
-    ax.xaxis.pane.fill = False
-    ax.yaxis.pane.fill = False
-    ax.zaxis.pane.fill = False
+    # Snap grid bounds to spacing multiples
+    x0 = math.floor((cx - extent / 2 - pad) / spacing) * spacing
+    x1 = math.ceil((cx + extent / 2 + pad) / spacing) * spacing
+    y0 = math.floor((cy - extent / 2 - pad) / spacing) * spacing
+    y1 = math.ceil((cy + extent / 2 + pad) / spacing) * spacing
 
-    if title:
-        ax.set_title(title, fontsize=10, fontweight='bold')
+    lw = max(0.4, spacing * 0.02)  # line half-width
+
+    # --- Ground plane (slightly below grid lines to avoid z-fighting) ---
+    ground = trimesh.creation.box(
+        extents=[x1 - x0, y1 - y0, 0.01],
+        transform=trimesh.transformations.translation_matrix(
+            [(x0 + x1) / 2, (y0 + y1) / 2, z_floor - 0.02]
+        ),
+    )
+
+    # --- Grid lines as thin quads at z_floor ---
+    verts = []
+    faces = []
+
+    def _add_quad(v0, v1, v2, v3):
+        n = len(verts)
+        verts.extend([v0, v1, v2, v3])
+        faces.extend([[n, n + 1, n + 2], [n, n + 2, n + 3]])
+
+    # Lines parallel to X axis (one per Y tick)
+    y = y0
+    while y <= y1 + 0.001:
+        _add_quad(
+            [x0, y - lw, z_floor], [x1, y - lw, z_floor],
+            [x1, y + lw, z_floor], [x0, y + lw, z_floor],
+        )
+        y += spacing
+
+    # Lines parallel to Y axis (one per X tick)
+    x = x0
+    while x <= x1 + 0.001:
+        _add_quad(
+            [x - lw, y0, z_floor], [x + lw, y0, z_floor],
+            [x + lw, y1, z_floor], [x - lw, y1, z_floor],
+        )
+        x += spacing
+
+    grid_lines = trimesh.Trimesh(
+        vertices=np.array(verts), faces=np.array(faces)
+    )
+    return ground, grid_lines
 
 
-def get_volume_text(stl_mesh):
-    """Safely compute volume string, returning empty on failure."""
+def _build_scene(tm):
+    """Create a pyrender scene containing the mesh, ground grid, + lights.
+
+    Returns (scene, bounding_sphere_radius, center).
+    """
+    # Compute smooth vertex normals so Phong shading looks good
+    tm.fix_normals()
+
+    mesh = pyrender.Mesh.from_trimesh(
+        tm,
+        smooth=True,
+        material=pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.42, 0.62, 0.92, 1.0],  # medium blue
+            metallicFactor=0.1,
+            roughnessFactor=0.6,
+            doubleSided=True,
+        ),
+    )
+
+    scene = pyrender.Scene(
+        bg_color=[0.90, 0.90, 0.92, 1.0],  # neutral light gray
+        ambient_light=[0.3, 0.3, 0.3],
+    )
+    scene.add(mesh)
+
+    # Ground grid
+    ground, grid_lines = _build_grid(tm)
+
+    ground_mat = pyrender.MetallicRoughnessMaterial(
+        baseColorFactor=[0.82, 0.82, 0.84, 1.0],
+        metallicFactor=0.0,
+        roughnessFactor=0.9,
+    )
+    grid_mat = pyrender.MetallicRoughnessMaterial(
+        baseColorFactor=[0.68, 0.68, 0.72, 1.0],
+        metallicFactor=0.0,
+        roughnessFactor=0.9,
+    )
+    scene.add(pyrender.Mesh.from_trimesh(ground, material=ground_mat, smooth=False))
+    scene.add(pyrender.Mesh.from_trimesh(grid_lines, material=grid_mat, smooth=False))
+
+    # Three-point lighting
+    for direction in ([1, 1, 1], [-1, 0.5, 0.5], [0, -1, 1]):
+        light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=2.5)
+        d = np.array(direction, dtype=float)
+        d /= np.linalg.norm(d)
+        pose = np.eye(4)
+        pose[0:3, 2] = -d  # pyrender light shines along -Z of its frame
+        scene.add(light, pose=pose)
+
+    # Bounding sphere for camera framing
+    center = tm.bounding_box.centroid
+    radius = np.linalg.norm(tm.bounding_box.extents) / 2.0
+
+    return scene, radius, center
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+VIEW_SIZE = 600  # width/height of each sub-view
+
+
+def _add_edges(color, depth, strength=0.6):
+    """Overlay edge lines detected from the depth buffer onto the color image."""
+    valid = depth > 0
+    if not valid.any():
+        return color
+
+    # Normalise depth into 0-1 range for gradient detection
+    d = np.zeros_like(depth)
+    d_min, d_max = depth[valid].min(), depth[valid].max()
+    if d_max - d_min > 0:
+        d[valid] = (depth[valid] - d_min) / (d_max - d_min)
+
+    # Sobel-style gradient magnitude
+    dy = np.zeros_like(d)
+    dx = np.zeros_like(d)
+    dy[1:, :] = np.abs(d[1:, :] - d[:-1, :])
+    dx[:, 1:] = np.abs(d[:, 1:] - d[:, :-1])
+    edges = np.sqrt(dx ** 2 + dy ** 2)
+
+    # Object-boundary edges (depth jumps from 0 to non-zero)
+    boundary = np.zeros_like(valid)
+    boundary[1:, :] |= (valid[1:, :] != valid[:-1, :])
+    boundary[:, 1:] |= (valid[:, 1:] != valid[:, :-1])
+
+    # Normalise to 0-1 and apply threshold
+    p = np.percentile(edges[valid], 97) if valid.sum() > 100 else 1.0
+    if p > 0:
+        edges = np.clip(edges / p, 0, 1)
+    edge_alpha = np.clip(edges * strength, 0, strength)
+    edge_alpha[boundary] = np.maximum(edge_alpha[boundary], strength * 0.8)
+
+    # Darken colour at edge pixels
+    result = color.astype(np.float32)
+    for c in range(3):
+        result[:, :, c] *= (1 - edge_alpha)
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+def render_view(tm, elev, azim, width=VIEW_SIZE, height=VIEW_SIZE):
+    """Render the mesh from a specific angle. Returns a PIL Image."""
+    scene, radius, center = _build_scene(tm)
+
+    # Camera
+    yfov = math.radians(35)
+    cam = pyrender.PerspectiveCamera(yfov=yfov)
+    distance = radius / math.sin(yfov / 2) * 1.15  # slight padding
+
+    cam_pose = _rotation_matrix(elev, azim)
+    cam_pose[0:3, 3] = center + cam_pose[0:3, 2] * distance
+
+    scene.add(cam, pose=cam_pose)
+
     try:
-        volume = stl_mesh.get_mass_properties()[0]
-        return f"  |  Volume: ~{abs(volume):.0f} mm\u00b3"
+        renderer = pyrender.OffscreenRenderer(width, height)
+        color, depth = renderer.render(scene)
+        renderer.delete()
     except Exception:
-        return ""
+        # EGL may not be available — fall back to osmesa
+        os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+        import importlib, OpenGL
+        importlib.reload(OpenGL)
+        import pyrender as _pr
+        importlib.reload(_pr)
+        renderer = _pr.OffscreenRenderer(width, height)
+        color, depth = renderer.render(scene)
+        renderer.delete()
+
+    color = _add_edges(color, depth)
+    return Image.fromarray(color)
 
 
-def render_single(stl_mesh, output_path, title="Model Preview"):
-    """Render a single isometric view."""
-    fig = plt.figure(figsize=(10, 8), dpi=120)
-    ax = fig.add_subplot(111, projection='3d')
-    setup_3d_axes(ax, stl_mesh, elev=25, azim=-60, title=title)
+def _get_font(size=14):
+    """Try to load a nice sans-serif font, falling back to PIL default."""
+    candidates = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNSText.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
 
-    mins, maxs, center, size = get_bounds(stl_mesh)
-    dim_text = f"Bounding box: {size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm"
-    dim_text += get_volume_text(stl_mesh)
-    fig.text(0.5, 0.02, dim_text, ha='center', fontsize=9, style='italic',
-             color='gray')
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=120, bbox_inches='tight',
-                facecolor='white', pad_inches=0.3)
-    plt.close()
+def _info_text(tm):
+    """Bounding box + volume footer string."""
+    extents = tm.bounding_box.extents
+    text = f"Bounding box: {extents[0]:.1f} x {extents[1]:.1f} x {extents[2]:.1f} mm"
+    try:
+        vol = abs(tm.volume)
+        text += f"  |  Volume: ~{vol:.0f} mm\u00b3"
+    except Exception:
+        pass
+    return text
+
+
+def render_single(tm, output_path, title="Model Preview"):
+    """Render a single isometric view with title and footer."""
+    img = render_view(tm, elev=25, azim=-60, width=900, height=750)
+
+    # Add title + footer
+    canvas = Image.new("RGB", (img.width, img.height + 80), "white")
+    canvas.paste(img, (0, 40))
+    draw = ImageDraw.Draw(canvas)
+
+    title_font = _get_font(20)
+    info_font = _get_font(14)
+
+    draw.text((canvas.width // 2, 10), title, fill="black", font=title_font, anchor="mt")
+    draw.text((canvas.width // 2, canvas.height - 20), _info_text(tm),
+              fill="gray", font=info_font, anchor="mb")
+
+    canvas.save(output_path)
     return output_path
 
 
-def render_multi_view(stl_mesh, output_path, title="Model Preview"):
+def render_multi_view(tm, output_path, title="Model Preview"):
     """Render 4-view technical preview: iso, front, top, right."""
-    fig = plt.figure(figsize=(14, 11), dpi=120)
-    fig.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
-
     views = [
-        (221, 25, -60, "Isometric"),
-        (222, 5,  -90, "Front (Y-)"),
-        (223, 90, -90, "Top (Z+)"),
-        (224, 5,    0, "Right (X+)"),
+        (25,  -60, "Isometric"),
+        (5,   -90, "Front (Y-)"),
+        (90,  -90, "Top (Z+)"),
+        (5,     0, "Right (X+)"),
     ]
 
-    for subplot, elev, azim, view_title in views:
-        ax = fig.add_subplot(subplot, projection='3d')
-        setup_3d_axes(ax, stl_mesh, elev, azim, title=view_title)
+    images = []
+    for elev, azim, _label in views:
+        images.append((render_view(tm, elev, azim), _label))
 
-    mins, maxs, center, size = get_bounds(stl_mesh)
-    dim_text = f"Bounding box: {size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm"
-    dim_text += get_volume_text(stl_mesh)
-    fig.text(0.5, 0.01, dim_text, ha='center', fontsize=9, style='italic',
-             color='gray')
+    # Compose 2x2 grid
+    gap = 4
+    header_h = 40
+    footer_h = 40
+    label_h = 24
+    w = VIEW_SIZE * 2 + gap
+    h = VIEW_SIZE * 2 + gap + header_h + footer_h + label_h * 2
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.96])
-    plt.savefig(output_path, dpi=120, bbox_inches='tight',
-                facecolor='white', pad_inches=0.3)
-    plt.close()
+    canvas = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(canvas)
+
+    title_font = _get_font(20)
+    label_font = _get_font(14)
+    info_font = _get_font(13)
+
+    # Title
+    draw.text((w // 2, 12), title, fill="black", font=title_font, anchor="mt")
+
+    positions = [
+        (0, 0),
+        (VIEW_SIZE + gap, 0),
+        (0, VIEW_SIZE + gap + label_h),
+        (VIEW_SIZE + gap, VIEW_SIZE + gap + label_h),
+    ]
+
+    for idx, ((img, label), (px, py)) in enumerate(zip(images, positions)):
+        y_off = header_h + (label_h if idx < 2 else 0)
+        canvas.paste(img, (px, py + y_off))
+        # Label above each view
+        draw.text((px + VIEW_SIZE // 2, py + y_off - 4), label,
+                  fill="#444444", font=label_font, anchor="mb")
+
+    # Footer
+    draw.text((w // 2, h - 12), _info_text(tm),
+              fill="gray", font=info_font, anchor="mb")
+
+    canvas.save(output_path)
     return output_path
 
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Preview a 3D model STL file")
@@ -158,17 +422,17 @@ def main():
     if args.title is None:
         args.title = os.path.splitext(os.path.basename(args.stl_file))[0].replace("_", " ").title()
 
-    stl_mesh = load_stl(args.stl_file)
-    mins, maxs, center, size = get_bounds(stl_mesh)
+    tm = load_mesh(args.stl_file)
 
+    extents = tm.bounding_box.extents
     print(f"Model: {args.stl_file}")
-    print(f"Bounding box: {size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm")
-    print(f"Triangles: {len(stl_mesh.vectors)}")
+    print(f"Bounding box: {extents[0]:.1f} x {extents[1]:.1f} x {extents[2]:.1f} mm")
+    print(f"Triangles: {len(tm.faces)}")
 
     if args.views == "multi":
-        render_multi_view(stl_mesh, args.output, args.title)
+        render_multi_view(tm, args.output, args.title)
     else:
-        render_single(stl_mesh, args.output, args.title)
+        render_single(tm, args.output, args.title)
 
     print(f"Preview saved: {args.output} ({os.path.getsize(args.output)} bytes)")
 

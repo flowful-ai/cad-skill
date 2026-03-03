@@ -16,10 +16,10 @@ This skill generates parametric 3D models using **CadQuery** (Python) and export
 python3 -m venv .venv && source .venv/bin/activate
 
 # Install CadQuery and preview dependencies
-pip install cadquery numpy-stl matplotlib
+pip install cadquery trimesh pyrender Pillow
 ```
 
-CadQuery uses the OpenCASCADE kernel under the hood. numpy-stl and matplotlib are used for the preview-analyze-iterate loop. No display server is needed - everything runs headlessly.
+CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow are used for the preview-analyze-iterate loop. No display server is needed — everything renders headlessly via pyrender's offscreen backend.
 
 **If CadQuery fails to install** (OCC kernel build errors), try:
 ```bash
@@ -30,13 +30,38 @@ conda install -c cadquery -c conda-forge cadquery
 pip install cadquery --find-links https://github.com/CadQuery/CadQuery/releases
 ```
 
+## Real-World Dimension Research
+
+When designing objects that interface with real products (phones, chargers, PCBs, connectors, etc.), **use web search to find accurate dimensions** before writing any geometry code. Don't guess or use approximate values — even 1-2mm off can make a part unusable.
+
+**What to research:**
+- Connector/port dimensions (USB-C: 8.4 x 2.6mm opening, Lightning, barrel jacks)
+- Device dimensions (phone width/thickness, PCB footprints, charger puck diameters)
+- Mounting hole patterns and screw sizes (M2.5, M3, etc.)
+- Standard component specs (MagSafe puck: 56mm diameter, 5.6mm thick)
+- Cable bend radii and strain relief requirements
+
+**How to use it:**
+1. Search for "[product] dimensions mm" or "[component] datasheet"
+2. Cross-reference at least 2 sources when precision matters
+3. Add the sourced dimensions as comments in the PARAMETERS section:
+   ```python
+   # MagSafe puck dimensions (source: Apple spec + iFixit teardown)
+   puck_diameter = 56.0    # mm
+   puck_thickness = 5.6    # mm
+   ```
+4. When in doubt, add 0.3-0.5mm clearance to external dimensions
+
+This is especially important for: phone cases/stands, charger mounts, PCB enclosures, cable management, adapter fittings, and anything that clips onto or wraps around an existing product.
+
 ## Core Workflow
 
 1. **Gather requirements** (see Requirements Gathering below)
-2. **Phase 1 — Base shape**: Build outer shell, preview, get user feedback
-3. **Phase 2 — Features**: Add functional details, preview, get user feedback
-4. **Phase 3 — Final delivery**: Fillets, cleanup, final preview + STL + print recommendations
-5. **Offer parameter tweaks** after delivery
+2. **Research dimensions** of any real-world products involved (see above)
+3. **Phase 1 — Base shape**: Build outer shell, preview, get user feedback
+4. **Phase 2 — Features**: Add functional details, preview, get user feedback
+5. **Phase 3 — Final delivery**: Fillets, cleanup, final preview + STL + print recommendations
+6. **Offer parameter tweaks** after delivery
 
 This is a **collaborative, show-as-you-go** process. Do NOT disappear and come back with a finished model. Show the user your progress at each phase and incorporate their feedback before moving on.
 
@@ -70,7 +95,7 @@ Build the model in phases. At each phase, export an STL, render a preview, self-
 
 ### Setup (first time per session)
 ```bash
-pip install numpy-stl matplotlib
+pip install trimesh pyrender Pillow
 ```
 
 ### Preview recipe (use at every phase)
@@ -226,9 +251,13 @@ Other patterns: mounting brackets, cable routing channels, text/labels (`.text()
 - **Zero-thickness geometry**: Ensure boolean operations don't create infinitely thin walls
 - **Fillet failures**: Apply fillets LAST and from largest to smallest radius. If a fillet fails, reduce its radius.
 - **Shell + Fillet ordering**: Apply `.shell()` BEFORE `.fillet()`. Shelling a filleted body often fails. Shell first to hollow out, then fillet the edges.
+- **Fillet before boolean cuts**: Apply fillets to the main body BEFORE boolean cut operations (holes, slots, pockets). This produces cleaner geometry and avoids fillet failures on complex edges left by cuts.
 - **Coordinate system**: CadQuery centers geometry at origin by default. Use `centered=(True, True, False)` on `.box()` to place bottom at Z=0.
 - **Hole direction**: `.hole()` cuts through the entire part by default. Use `.cboreHole()` or `.cskHole()` for counterbore/countersink.
 - **Export errors**: If export fails, the geometry may be invalid. Check for self-intersecting shapes.
+- **Taper direction**: In `.extrude(taper=angle)`, a **positive** taper angle narrows the shape (draft inward), **negative** flares it outward. This is opposite to what many people expect.
+- **Shell on tapered/complex geometry**: `.shell()` frequently fails on tapered bodies, lofted shapes, or geometry with many fillets. The reliable alternative is **boolean subtraction** — create the outer solid, create a slightly smaller inner solid, then use `outer.cut(inner)` to hollow it out. This gives you full control over wall thickness at every point.
+- **Loft is fragile**: CadQuery's `.loft()` fails on many cross-section combinations. Prefer `.extrude(taper=angle)` when transitioning between a shape and a scaled version of itself. Only use `.loft()` when you need to transition between genuinely different profiles (e.g., circle to rectangle).
 
 ## Export
 
