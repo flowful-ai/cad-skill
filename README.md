@@ -7,7 +7,7 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for genera
   <img src="docs/iphone12_case_preview.png" alt="iPhone 13 Pro case preview — 4 views" width="480">
 </p>
 
-Read the full write-up: [I Taught Claude to Design 3D-Printable Parts. Here's How](https://medium.com/TODO)
+Read the full write-up: [I Taught Claude to Design 3D-Printable Parts. Here's How](https://medium.com/@nchourrout/i-taught-claude-to-design-3d-printable-parts-heres-how-675f644af78a)
 
 ## Installation
 
