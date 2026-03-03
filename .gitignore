@@ -4,6 +4,7 @@ __pycache__/
 *.stl
 *.3mf
 *_preview.png
+!docs/*
 press/
 
 # Example models (not part of the skill)
