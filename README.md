@@ -1,4 +1,4 @@
-# parametric-3d-printing
+# CAD Skill for Claude Code
 
 A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for generating parametric 3D-printable models using [CadQuery](https://cadquery.readthedocs.io/). Describe a physical object, and Claude will write a parametric script, export STL, render previews, and iterate with you until it's right.
 
