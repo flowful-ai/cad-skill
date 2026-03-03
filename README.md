@@ -4,7 +4,7 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for genera
 
 <p align="center">
   <img src="docs/magsafe_stand_preview.png" alt="MagSafe stand preview — 4 views" width="480">
-  <img src="docs/iphone12_case_preview.png" alt="iPhone 13 Pro case preview — 4 views" width="480">
+  <img src="docs/iphone13_pro_case_preview.png" alt="iPhone 13 Pro case preview — 4 views" width="480">
 </p>
 
 Read the full write-up: [I Taught Claude to Design 3D-Printable Parts. Here's How](https://medium.com/@nchourrout/i-taught-claude-to-design-3d-printable-parts-heres-how-675f644af78a)
@@ -35,4 +35,4 @@ pip install cadquery trimesh pyrender Pillow
 
 ---
 
-Created by [Nicolas Chourrout](https://flowful.ai) from [Flowful.ai](https://flowful.ai)
+Created by [Nicolas Chourrout](https://github.com/nchourrout) from [Flowful.ai](https://flowful.ai)
