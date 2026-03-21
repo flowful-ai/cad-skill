@@ -25,7 +25,7 @@ python3 preview.py model.stl preview.png --views multi
 
 ### Step 2: View the Preview
 
-Use the `view` tool to look at the generated PNG. This lets you see the model from 4 angles (isometric, front, top, right) with dimensions.
+Read the generated PNG file to inspect it visually. The multi-view layout shows the model from 4 angles (isometric, front, top, right) with dimensions in the footer.
 
 ### Step 3: Analyze the Preview
 
@@ -117,6 +117,23 @@ assert abs(bb.xlen - expected_width) < 0.1, f"Width mismatch: {bb.xlen} vs {expe
 - Volume is reasonable (not suspiciously small or large)
 - Volume > 0 confirms the model is a valid solid
 - Compare volume with/without shell to verify wall thickness
+
+### Watertight Check
+
+Non-watertight meshes are the most common cause of slicing failures. Always verify:
+
+```python
+import trimesh
+
+tm = trimesh.load("model.stl", force="mesh")
+if tm.is_watertight:
+    print("Mesh is watertight (good)")
+else:
+    print("WARNING: Mesh is NOT watertight — will cause slicing issues")
+    # Common causes: unclosed shells, boolean artifacts, zero-thickness faces
+```
+
+Note: `preview.py` checks watertight status automatically when generating previews.
 
 ---
 

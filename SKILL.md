@@ -12,8 +12,8 @@ This skill generates parametric 3D models using **CadQuery** (Python) and export
 ## Setup
 
 ```bash
-# Create a virtual environment (recommended)
-python3 -m venv .venv && source .venv/bin/activate
+# CadQuery requires Python 3.10-3.12 (OCC kernel lacks 3.13+ wheels)
+python3.12 -m venv .venv && source .venv/bin/activate
 
 # Install CadQuery and preview dependencies
 pip install cadquery trimesh pyrender Pillow
@@ -93,11 +93,6 @@ Start with the first two (what + dimensions), then ask about mounting and materi
 
 Build the model in phases. At each phase, export an STL, render a preview, self-review it, then **show it to the user and ask for feedback** before proceeding. This catches problems early and keeps the user involved.
 
-### Setup (first time per session)
-```bash
-pip install trimesh pyrender Pillow
-```
-
 ### Preview recipe (use at every phase)
 ```bash
 python3 preview.py model.stl preview.png --views multi
@@ -169,8 +164,8 @@ fit_clearance = 0.3 # mm - clearance for press-fit (adjust per printer)
 # ============================================================
 result = (
     cq.Workplane("XY")
-    .box(width, depth, height)
-    # ... build geometry using parameters above
+    .box(width, depth, height, centered=(True, True, False))
+    # ... build geometry using parameters above (bottom at Z=0)
 )
 
 # ============================================================
@@ -201,6 +196,8 @@ Key FDM design defaults:
 | Fillet radius (bottom) | 0.5mm | 1.0mm |
 | Bridge span | - | < 20mm unsupported |
 | Overhang angle | - | < 45 degrees from vertical |
+
+**Material-specific adjustments:** TPU needs larger clearances (~0.5mm) due to flex. PETG is stickier, so add +0.1mm to fit clearances. ABS shrinks ~0.5-0.7%, so scale critical dimensions up slightly. When in doubt, print a small test piece first.
 
 ### Orientation Awareness
 - Design with print orientation in mind
@@ -249,9 +246,8 @@ Other patterns: mounting brackets, cable routing channels, text/labels (`.text()
 
 ### Common Pitfalls
 - **Zero-thickness geometry**: Ensure boolean operations don't create infinitely thin walls
-- **Fillet failures**: Apply fillets LAST and from largest to smallest radius. If a fillet fails, reduce its radius.
-- **Shell + Fillet ordering**: Apply `.shell()` BEFORE `.fillet()`. Shelling a filleted body often fails. Shell first to hollow out, then fillet the edges.
-- **Fillet before boolean cuts**: Apply fillets to the main body BEFORE boolean cut operations (holes, slots, pockets). This produces cleaner geometry and avoids fillet failures on complex edges left by cuts.
+- **Fillet failures**: Apply fillets from largest to smallest radius. If a fillet fails, reduce its radius.
+- **Fillet/shell/cut ordering**: The correct sequence is `.shell()` first (hollow out), then `.fillet()` (round edges), then boolean cuts (holes, slots, pockets). Shelling a filleted body often fails, and filleting edges left by cuts is fragile.
 - **Coordinate system**: CadQuery centers geometry at origin by default. Use `centered=(True, True, False)` on `.box()` to place bottom at Z=0.
 - **Hole direction**: `.hole()` cuts through the entire part by default. Use `.cboreHole()` or `.cskHole()` for counterbore/countersink.
 - **Export errors**: If export fails, the geometry may be invalid. Check for self-intersecting shapes.

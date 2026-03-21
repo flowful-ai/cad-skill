@@ -4,8 +4,9 @@ Render preview images of a CadQuery model for visual inspection.
 
 Usage:
     python3 preview.py model.stl [output.png]
-    python3 preview.py model.stl --views multi   # 4-view technical sheet
-    python3 preview.py model.stl --views iso      # single isometric (default)
+    python3 preview.py model.stl --views multi       # 4-view technical sheet
+    python3 preview.py model.stl --views iso          # single isometric
+    python3 preview.py model.stl --resolution 800     # higher-res per view
 
 Dependencies:
     pip install trimesh pyrender Pillow
@@ -80,7 +81,7 @@ def _rotation_matrix(elev_deg, azim_deg):
     right /= np.linalg.norm(right)
     cam_up = np.cross(right, forward)
 
-    # Build OpenGL camera matrix (‑Z forward)
+    # Build OpenGL camera matrix (-Z forward)
     pose = np.eye(4)
     pose[0:3, 0] = right
     pose[0:3, 1] = cam_up
@@ -161,7 +162,7 @@ def _build_grid(tm):
 
 
 def _build_scene(tm):
-    """Create a pyrender scene containing the mesh, ground grid, + lights.
+    """Create a pyrender scene containing the mesh, ground grid, and lights.
 
     Returns (scene, bounding_sphere_radius, center).
     """
@@ -221,7 +222,9 @@ def _build_scene(tm):
 # Rendering
 # ---------------------------------------------------------------------------
 
-VIEW_SIZE = 600  # width/height of each sub-view
+DEFAULT_VIEW_SIZE = 600  # width/height of each sub-view (multi-view)
+_SINGLE_WIDTH = 900      # single isometric view defaults
+_SINGLE_HEIGHT = 750
 
 
 def _add_edges(color, depth, strength=0.6):
@@ -257,16 +260,16 @@ def _add_edges(color, depth, strength=0.6):
 
     # Darken colour at edge pixels
     result = color.astype(np.float32)
-    for c in range(3):
-        result[:, :, c] *= (1 - edge_alpha)
+    result *= (1 - edge_alpha[:, :, np.newaxis])
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
-def render_view(tm, elev, azim, width=VIEW_SIZE, height=VIEW_SIZE):
-    """Render the mesh from a specific angle. Returns a PIL Image."""
-    scene, radius, center = _build_scene(tm)
+def _render_frame(scene, radius, center, elev, azim, renderer):
+    """Render one frame from an existing scene.
 
-    # Camera
+    Adds a camera, renders, then removes the camera so the scene can be
+    reused for additional views without rebuilding.
+    """
     yfov = math.radians(35)
     cam = pyrender.PerspectiveCamera(yfov=yfov)
     distance = radius / math.sin(yfov / 2) * 1.15  # slight padding
@@ -274,25 +277,30 @@ def render_view(tm, elev, azim, width=VIEW_SIZE, height=VIEW_SIZE):
     cam_pose = _rotation_matrix(elev, azim)
     cam_pose[0:3, 3] = center + cam_pose[0:3, 2] * distance
 
-    scene.add(cam, pose=cam_pose)
-
+    cam_node = scene.add(cam, pose=cam_pose)
     try:
-        renderer = pyrender.OffscreenRenderer(width, height)
         color, depth = renderer.render(scene)
-        renderer.delete()
-    except Exception:
-        # EGL may not be available — fall back to osmesa
-        os.environ["PYOPENGL_PLATFORM"] = "osmesa"
-        import importlib, OpenGL
-        importlib.reload(OpenGL)
-        import pyrender as _pr
-        importlib.reload(_pr)
-        renderer = _pr.OffscreenRenderer(width, height)
-        color, depth = renderer.render(scene)
-        renderer.delete()
+    except Exception as e:
+        scene.remove_node(cam_node)
+        raise RuntimeError(
+            f"Rendering failed: {e}\n"
+            "On Linux without GPU, try: PYOPENGL_PLATFORM=osmesa python3 preview.py ..."
+        ) from e
+    scene.remove_node(cam_node)
 
     color = _add_edges(color, depth)
     return Image.fromarray(color)
+
+
+def render_view(tm, elev, azim, width=DEFAULT_VIEW_SIZE, height=DEFAULT_VIEW_SIZE):
+    """Render the mesh from a specific angle. Returns a PIL Image."""
+    scene, radius, center = _build_scene(tm)
+    renderer = pyrender.OffscreenRenderer(width, height)
+    try:
+        img = _render_frame(scene, radius, center, elev, azim, renderer)
+    finally:
+        renderer.delete()
+    return img
 
 
 def _get_font(size=14):
@@ -324,9 +332,9 @@ def _info_text(tm):
     return text
 
 
-def render_single(tm, output_path, title="Model Preview"):
+def render_single(tm, output_path, title="Model Preview", width=_SINGLE_WIDTH, height=_SINGLE_HEIGHT):
     """Render a single isometric view with title and footer."""
-    img = render_view(tm, elev=25, azim=-60, width=900, height=750)
+    img = render_view(tm, elev=25, azim=-60, width=width, height=height)
 
     # Add title + footer
     canvas = Image.new("RGB", (img.width, img.height + 80), "white")
@@ -344,8 +352,11 @@ def render_single(tm, output_path, title="Model Preview"):
     return output_path
 
 
-def render_multi_view(tm, output_path, title="Model Preview"):
-    """Render 4-view technical preview: iso, front, top, right."""
+def render_multi_view(tm, output_path, title="Model Preview", view_size=DEFAULT_VIEW_SIZE):
+    """Render 4-view technical preview: iso, front, top, right.
+
+    Builds the scene once and reuses a single renderer for all views.
+    """
     views = [
         (25,  -60, "Isometric"),
         (5,   -90, "Front (Y-)"),
@@ -353,17 +364,23 @@ def render_multi_view(tm, output_path, title="Model Preview"):
         (5,     0, "Right (X+)"),
     ]
 
-    images = []
-    for elev, azim, _label in views:
-        images.append((render_view(tm, elev, azim), _label))
+    scene, radius, center = _build_scene(tm)
+    renderer = pyrender.OffscreenRenderer(view_size, view_size)
+    try:
+        images = []
+        for elev, azim, label in views:
+            img = _render_frame(scene, radius, center, elev, azim, renderer)
+            images.append((img, label))
+    finally:
+        renderer.delete()
 
     # Compose 2x2 grid
     gap = 4
     header_h = 40
     footer_h = 40
     label_h = 24
-    w = VIEW_SIZE * 2 + gap
-    h = VIEW_SIZE * 2 + gap + header_h + footer_h + label_h * 2
+    w = view_size * 2 + gap
+    h = view_size * 2 + gap + header_h + footer_h + label_h * 2
 
     canvas = Image.new("RGB", (w, h), "white")
     draw = ImageDraw.Draw(canvas)
@@ -377,16 +394,16 @@ def render_multi_view(tm, output_path, title="Model Preview"):
 
     positions = [
         (0, 0),
-        (VIEW_SIZE + gap, 0),
-        (0, VIEW_SIZE + gap + label_h),
-        (VIEW_SIZE + gap, VIEW_SIZE + gap + label_h),
+        (view_size + gap, 0),
+        (0, view_size + gap + label_h),
+        (view_size + gap, view_size + gap + label_h),
     ]
 
     for idx, ((img, label), (px, py)) in enumerate(zip(images, positions)):
         y_off = header_h + (label_h if idx < 2 else 0)
         canvas.paste(img, (px, py + y_off))
         # Label above each view
-        draw.text((px + VIEW_SIZE // 2, py + y_off - 4), label,
+        draw.text((px + view_size // 2, py + y_off - 4), label,
                   fill="#444444", font=label_font, anchor="mb")
 
     # Footer
@@ -409,6 +426,8 @@ def main():
     parser.add_argument("--views", choices=["iso", "multi"], default="multi",
                         help="View mode: iso (single) or multi (4-view)")
     parser.add_argument("--title", default=None, help="Title for the preview")
+    parser.add_argument("--resolution", type=int, default=DEFAULT_VIEW_SIZE,
+                        help=f"Pixels per view (default: {DEFAULT_VIEW_SIZE})")
     args = parser.parse_args()
 
     if not os.path.exists(args.stl_file):
@@ -429,10 +448,17 @@ def main():
     print(f"Bounding box: {extents[0]:.1f} x {extents[1]:.1f} x {extents[2]:.1f} mm")
     print(f"Triangles: {len(tm.faces)}")
 
-    if args.views == "multi":
-        render_multi_view(tm, args.output, args.title)
+    if tm.is_watertight:
+        print("Mesh: watertight (good)")
     else:
-        render_single(tm, args.output, args.title)
+        print("WARNING: Mesh is NOT watertight. May cause slicing issues.")
+
+    if args.views == "multi":
+        render_multi_view(tm, args.output, args.title, view_size=args.resolution)
+    else:
+        scale = args.resolution / DEFAULT_VIEW_SIZE
+        render_single(tm, args.output, args.title,
+                      width=int(_SINGLE_WIDTH * scale), height=int(_SINGLE_HEIGHT * scale))
 
     print(f"Preview saved: {args.output} ({os.path.getsize(args.output)} bytes)")
 

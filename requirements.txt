@@ -1,0 +1,5 @@
+# Requires Python 3.10-3.12 (CadQuery's OCC kernel lacks 3.13+ wheels)
+cadquery
+trimesh
+pyrender
+Pillow
