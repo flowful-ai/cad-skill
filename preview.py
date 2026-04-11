@@ -34,15 +34,24 @@ from PIL import Image, ImageDraw, ImageFont
 # ---------------------------------------------------------------------------
 
 def load_mesh(path):
-    """Load an STL file via trimesh. Exits on failure."""
+    """Load an STL file via trimesh.
+
+    Raises ValueError if the file cannot be parsed, contains no geometry,
+    has zero faces, or has non-finite vertex coordinates. This lets callers
+    handle the failure in-process instead of being killed by sys.exit, and
+    stops silent garbage from reaching pyrender (a zero-face or NaN mesh
+    would otherwise render a black image with no error).
+    """
     try:
         tm = trimesh.load(path, force="mesh")
     except Exception as e:
-        print(f"ERROR: Failed to load STL: {e}")
-        sys.exit(1)
+        raise ValueError(f"Failed to load STL: {e}") from e
     if not hasattr(tm, "vertices") or len(tm.vertices) == 0:
-        print("ERROR: STL file contains no geometry")
-        sys.exit(1)
+        raise ValueError("STL file contains no vertices")
+    if not hasattr(tm, "faces") or len(tm.faces) == 0:
+        raise ValueError("STL file contains no triangles")
+    if not np.isfinite(tm.vertices).all():
+        raise ValueError("STL file has non-finite vertex coordinates (NaN or inf)")
     return tm
 
 
@@ -295,11 +304,13 @@ def _render_frame(scene, radius, center, elev, azim, renderer):
 def render_view(tm, elev, azim, width=DEFAULT_VIEW_SIZE, height=DEFAULT_VIEW_SIZE):
     """Render the mesh from a specific angle. Returns a PIL Image."""
     scene, radius, center = _build_scene(tm)
-    renderer = pyrender.OffscreenRenderer(width, height)
+    renderer = None
     try:
+        renderer = pyrender.OffscreenRenderer(width, height)
         img = _render_frame(scene, radius, center, elev, azim, renderer)
     finally:
-        renderer.delete()
+        if renderer is not None:
+            renderer.delete()
     return img
 
 
@@ -365,14 +376,16 @@ def render_multi_view(tm, output_path, title="Model Preview", view_size=DEFAULT_
     ]
 
     scene, radius, center = _build_scene(tm)
-    renderer = pyrender.OffscreenRenderer(view_size, view_size)
+    renderer = None
     try:
+        renderer = pyrender.OffscreenRenderer(view_size, view_size)
         images = []
         for elev, azim, label in views:
             img = _render_frame(scene, radius, center, elev, azim, renderer)
             images.append((img, label))
     finally:
-        renderer.delete()
+        if renderer is not None:
+            renderer.delete()
 
     # Compose 2x2 grid
     gap = 4
@@ -428,11 +441,9 @@ def main():
     parser.add_argument("--title", default=None, help="Title for the preview")
     parser.add_argument("--resolution", type=int, default=DEFAULT_VIEW_SIZE,
                         help=f"Pixels per view (default: {DEFAULT_VIEW_SIZE})")
+    parser.add_argument("--strict", action="store_true",
+                        help="Fail with exit code 2 if the mesh is not watertight")
     args = parser.parse_args()
-
-    if not os.path.exists(args.stl_file):
-        print(f"ERROR: File not found: {args.stl_file}")
-        sys.exit(1)
 
     if args.output is None:
         base = os.path.splitext(args.stl_file)[0]
@@ -441,7 +452,11 @@ def main():
     if args.title is None:
         args.title = os.path.splitext(os.path.basename(args.stl_file))[0].replace("_", " ").title()
 
-    tm = load_mesh(args.stl_file)
+    try:
+        tm = load_mesh(args.stl_file)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     extents = tm.bounding_box.extents
     print(f"Model: {args.stl_file}")
@@ -451,7 +466,12 @@ def main():
     if tm.is_watertight:
         print("Mesh: watertight (good)")
     else:
-        print("WARNING: Mesh is NOT watertight. May cause slicing issues.")
+        print("WARNING: Mesh is NOT watertight. May cause slicing issues.",
+              file=sys.stderr)
+        if args.strict:
+            print("ERROR: --strict set, aborting before render.",
+                  file=sys.stderr)
+            sys.exit(2)
 
     if args.views == "multi":
         render_multi_view(tm, args.output, args.title, view_size=args.resolution)

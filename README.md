@@ -22,7 +22,7 @@ Requires **Python 3.10-3.12** (CadQuery's OCC kernel does not have wheels for 3.
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
-pip install cadquery trimesh pyrender Pillow
+pip install -r requirements.txt
 ```
 
 ## Files
@@ -30,8 +30,10 @@ pip install cadquery trimesh pyrender Pillow
 | File | Purpose |
 |------|---------|
 | `SKILL.md` | Skill definition and workflow instructions for Claude |
-| `preview.py` | Headless STL to multi-view PNG renderer (trimesh + pyrender) |
+| `preview.py` | Headless STL to multi-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
+| `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, and emits a JSON result so Claude can self-correct in a loop. |
 | `design-review.md` | Visual inspection checklist and printability analysis |
+| `requirements.txt` | Pinned dependency versions |
 
 ---
 
