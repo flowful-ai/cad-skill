@@ -28,31 +28,7 @@ import trimesh
 import pyrender
 from PIL import Image, ImageDraw, ImageFont
 
-
-# ---------------------------------------------------------------------------
-# Mesh loading
-# ---------------------------------------------------------------------------
-
-def load_mesh(path):
-    """Load an STL file via trimesh.
-
-    Raises ValueError if the file cannot be parsed, contains no geometry,
-    has zero faces, or has non-finite vertex coordinates. This lets callers
-    handle the failure in-process instead of being killed by sys.exit, and
-    stops silent garbage from reaching pyrender (a zero-face or NaN mesh
-    would otherwise render a black image with no error).
-    """
-    try:
-        tm = trimesh.load(path, force="mesh")
-    except Exception as e:
-        raise ValueError(f"Failed to load STL: {e}") from e
-    if not hasattr(tm, "vertices") or len(tm.vertices) == 0:
-        raise ValueError("STL file contains no vertices")
-    if not hasattr(tm, "faces") or len(tm.faces) == 0:
-        raise ValueError("STL file contains no triangles")
-    if not np.isfinite(tm.vertices).all():
-        raise ValueError("STL file has non-finite vertex coordinates (NaN or inf)")
-    return tm
+from mesh_io import load_mesh  # re-exported: preview's public surface for mesh loading
 
 
 # ---------------------------------------------------------------------------

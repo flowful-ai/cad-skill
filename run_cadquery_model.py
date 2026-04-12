@@ -88,16 +88,21 @@ def _process_stls(stls, views, strict, want_preview):
     Single pass so an STL is never loaded twice when both outputs are
     requested, and so --strict's watertight check runs on every mesh.
 
+    `mesh_io` is imported lazily because the wrapper's common case (bare
+    run, no --preview, no --strict) doesn't touch meshes at all. `preview`
+    is imported only inside the rendering branch so that --strict by itself
+    stays headless-safe (no pyrender / PyOpenGL required).
+
     Returns a dict with previews, watertights (lists), and error (str or None).
     The caller surfaces the error into result["stderr"].
     """
-    import preview  # lazy: trimesh + pyrender are heavy and only needed here.
+    import mesh_io  # trimesh + numpy only
 
     out = {"previews": [], "watertights": [], "error": None}
 
     for stl in stls:
         try:
-            tm = preview.load_mesh(stl)
+            tm = mesh_io.load_mesh(stl)
         except ValueError as e:
             out["error"] = f"Mesh load failed ({stl}): {e}"
             return out
@@ -110,6 +115,7 @@ def _process_stls(stls, views, strict, want_preview):
             return out
 
         if want_preview:
+            import preview  # heavy: trimesh + pyrender, only here
             preview_path = _sibling(stl, "_preview.png")
             try:
                 if views == "multi":

@@ -25,14 +25,14 @@ import sys
 
 
 def convert(stl_path, out_path=None):
-    # Lazy import: loading preview at module level pulls in pyrender (and
-    # thus PyOpenGL), which adds ~500 ms of startup for a pure STL->3MF
-    # tool that never renders. Import inside the one function that needs it.
-    import preview  # reused for "bad STL -> ValueError" consistency
+    # Lazy import of mesh_io (trimesh + numpy only, no pyrender) keeps
+    # `import stl_to_3mf` cheap and keeps this CLI headless-safe: the tool
+    # promises "trimesh + lxml" and must not pull in pyrender / PyOpenGL.
+    import mesh_io
 
     if out_path is None:
         out_path = os.path.splitext(stl_path)[0] + ".3mf"
-    mesh = preview.load_mesh(stl_path)
+    mesh = mesh_io.load_mesh(stl_path)
     mesh.export(out_path)
     return out_path
 
