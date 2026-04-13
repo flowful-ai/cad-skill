@@ -1,5 +1,9 @@
-# Requires Python 3.10-3.12 (CadQuery's OCC kernel lacks 3.13+ wheels)
-cadquery
-trimesh
-pyrender
-Pillow
+# Requires Python 3.10-3.12 (CadQuery's OCC kernel lacks 3.13+ wheels).
+# Pinned to the versions this skill was last tested against; bump
+# deliberately and re-run all example scripts + previews if you upgrade.
+cadquery>=2.6.1,<3
+trimesh>=4.0,<5
+pyrender>=0.1.45,<0.2
+Pillow>=10,<13
+numpy>=1.24,<3
+lxml>=4.9,<7

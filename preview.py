@@ -28,22 +28,7 @@ import trimesh
 import pyrender
 from PIL import Image, ImageDraw, ImageFont
 
-
-# ---------------------------------------------------------------------------
-# Mesh loading
-# ---------------------------------------------------------------------------
-
-def load_mesh(path):
-    """Load an STL file via trimesh. Exits on failure."""
-    try:
-        tm = trimesh.load(path, force="mesh")
-    except Exception as e:
-        print(f"ERROR: Failed to load STL: {e}")
-        sys.exit(1)
-    if not hasattr(tm, "vertices") or len(tm.vertices) == 0:
-        print("ERROR: STL file contains no geometry")
-        sys.exit(1)
-    return tm
+from mesh_io import load_mesh  # re-exported: preview's public surface for mesh loading
 
 
 # ---------------------------------------------------------------------------
@@ -161,10 +146,11 @@ def _build_grid(tm):
     return ground, grid_lines
 
 
-def _build_scene(tm):
-    """Create a pyrender scene containing the mesh, ground grid, and lights.
+def _build_scene(tm, include_ground=True):
+    """Create a pyrender scene containing the mesh, lights, and optionally ground.
 
-    Returns (scene, bounding_sphere_radius, center).
+    Returns (scene, bounding_sphere_radius, center, ground_node, grid_node).
+    ground_node/grid_node are None if include_ground is False.
     """
     # Compute smooth vertex normals so Phong shading looks good
     tm.fix_normals()
@@ -186,24 +172,27 @@ def _build_scene(tm):
     )
     scene.add(mesh)
 
-    # Ground grid
-    ground, grid_lines = _build_grid(tm)
+    # Ground grid (skipped for below-horizon views to avoid occluding the model)
+    ground_node = None
+    grid_node = None
+    if include_ground:
+        ground, grid_lines = _build_grid(tm)
+        ground_mat = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.82, 0.82, 0.84, 1.0],
+            metallicFactor=0.0,
+            roughnessFactor=0.9,
+        )
+        grid_mat = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.68, 0.68, 0.72, 1.0],
+            metallicFactor=0.0,
+            roughnessFactor=0.9,
+        )
+        ground_node = scene.add(pyrender.Mesh.from_trimesh(ground, material=ground_mat, smooth=False))
+        grid_node = scene.add(pyrender.Mesh.from_trimesh(grid_lines, material=grid_mat, smooth=False))
 
-    ground_mat = pyrender.MetallicRoughnessMaterial(
-        baseColorFactor=[0.82, 0.82, 0.84, 1.0],
-        metallicFactor=0.0,
-        roughnessFactor=0.9,
-    )
-    grid_mat = pyrender.MetallicRoughnessMaterial(
-        baseColorFactor=[0.68, 0.68, 0.72, 1.0],
-        metallicFactor=0.0,
-        roughnessFactor=0.9,
-    )
-    scene.add(pyrender.Mesh.from_trimesh(ground, material=ground_mat, smooth=False))
-    scene.add(pyrender.Mesh.from_trimesh(grid_lines, material=grid_mat, smooth=False))
-
-    # Three-point lighting
-    for direction in ([1, 1, 1], [-1, 0.5, 0.5], [0, -1, 1]):
+    # Four-point lighting: three from above + one from below so the
+    # bottom view (Z-) isn't in total shadow.
+    for direction in ([1, 1, 1], [-1, 0.5, 0.5], [0, -1, 1], [0, 0.5, -1]):
         light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=2.5)
         d = np.array(direction, dtype=float)
         d /= np.linalg.norm(d)
@@ -215,7 +204,7 @@ def _build_scene(tm):
     center = tm.bounding_box.centroid
     radius = np.linalg.norm(tm.bounding_box.extents) / 2.0
 
-    return scene, radius, center
+    return scene, radius, center, ground_node, grid_node
 
 
 # ---------------------------------------------------------------------------
@@ -294,12 +283,14 @@ def _render_frame(scene, radius, center, elev, azim, renderer):
 
 def render_view(tm, elev, azim, width=DEFAULT_VIEW_SIZE, height=DEFAULT_VIEW_SIZE):
     """Render the mesh from a specific angle. Returns a PIL Image."""
-    scene, radius, center = _build_scene(tm)
-    renderer = pyrender.OffscreenRenderer(width, height)
+    scene, radius, center, _, _ = _build_scene(tm)
+    renderer = None
     try:
+        renderer = pyrender.OffscreenRenderer(width, height)
         img = _render_frame(scene, radius, center, elev, azim, renderer)
     finally:
-        renderer.delete()
+        if renderer is not None:
+            renderer.delete()
     return img
 
 
@@ -320,16 +311,25 @@ def _get_font(size=14):
     return ImageFont.load_default()
 
 
-def _info_text(tm):
-    """Bounding box + volume footer string."""
+def _info_lines(tm):
+    """Two-line footer with dimensions, volume, triangle count, and status."""
     extents = tm.bounding_box.extents
-    text = f"Bounding box: {extents[0]:.1f} x {extents[1]:.1f} x {extents[2]:.1f} mm"
+    line1 = f"Bounding box: {extents[0]:.1f} x {extents[1]:.1f} x {extents[2]:.1f} mm"
     try:
         vol = abs(tm.volume)
-        text += f"  |  Volume: ~{vol:.0f} mm\u00b3"
+        line1 += f"  |  Volume: {vol/1000:.1f} cm\u00b3"
     except Exception:
         pass
-    return text
+
+    line2 = f"Triangles: {len(tm.faces):,}"
+    line2 += f"  |  {'Watertight' if tm.is_watertight else 'NOT watertight'}"
+    try:
+        vol = abs(tm.volume)
+        weight_g = vol / 1000 * 1.24  # PLA density ~1.24 g/cm3
+        line2 += f"  |  PLA estimate: ~{weight_g:.0f} g"
+    except Exception:
+        pass
+    return line1, line2
 
 
 def render_single(tm, output_path, title="Model Preview", width=_SINGLE_WIDTH, height=_SINGLE_HEIGHT):
@@ -337,78 +337,89 @@ def render_single(tm, output_path, title="Model Preview", width=_SINGLE_WIDTH, h
     img = render_view(tm, elev=25, azim=-60, width=width, height=height)
 
     # Add title + footer
-    canvas = Image.new("RGB", (img.width, img.height + 80), "white")
+    canvas = Image.new("RGB", (img.width, img.height + 100), "white")
     canvas.paste(img, (0, 40))
     draw = ImageDraw.Draw(canvas)
 
     title_font = _get_font(20)
-    info_font = _get_font(14)
+    info_font = _get_font(13)
+    line1, line2 = _info_lines(tm)
 
     draw.text((canvas.width // 2, 10), title, fill="black", font=title_font, anchor="mt")
-    draw.text((canvas.width // 2, canvas.height - 20), _info_text(tm),
+    draw.text((canvas.width // 2, canvas.height - 30), line1,
+              fill="gray", font=info_font, anchor="mb")
+    draw.text((canvas.width // 2, canvas.height - 10), line2,
               fill="gray", font=info_font, anchor="mb")
 
     canvas.save(output_path)
     return output_path
 
 
-def render_multi_view(tm, output_path, title="Model Preview", view_size=DEFAULT_VIEW_SIZE):
-    """Render 4-view technical preview: iso, front, top, right.
+def render_multi_view(tm, output_path, title="Model Preview", subtitle=None, view_size=DEFAULT_VIEW_SIZE):
+    """Render 6-view technical preview in a 3x2 grid.
 
+    Views: isometric, front, right (top row), back-iso, top, bottom (bottom row).
     Builds the scene once and reuses a single renderer for all views.
     """
     views = [
         (25,  -60, "Isometric"),
         (5,   -90, "Front (Y-)"),
-        (90,  -90, "Top (Z+)"),
         (5,     0, "Right (X+)"),
+        (25,  120, "Back Isometric"),
+        (90,  -90, "Top (Z+)"),
+        (-90, -90, "Bottom (Z-)"),
     ]
 
-    scene, radius, center = _build_scene(tm)
-    renderer = pyrender.OffscreenRenderer(view_size, view_size)
+    scene, radius, center, _, _ = _build_scene(tm, include_ground=True)
+    scene_bottom, _, _, _, _ = _build_scene(tm, include_ground=False)
+    renderer = None
     try:
+        renderer = pyrender.OffscreenRenderer(view_size, view_size)
         images = []
         for elev, azim, label in views:
-            img = _render_frame(scene, radius, center, elev, azim, renderer)
+            s = scene_bottom if elev < 0 else scene
+            img = _render_frame(s, radius, center, elev, azim, renderer)
             images.append((img, label))
     finally:
-        renderer.delete()
+        if renderer is not None:
+            renderer.delete()
 
-    # Compose 2x2 grid
+    # Compose 3x2 grid
+    cols = 3
+    rows = 2
     gap = 4
-    header_h = 40
-    footer_h = 40
+    header_h = 40 + (20 if subtitle else 0)
+    footer_h = 55
     label_h = 24
-    w = view_size * 2 + gap
-    h = view_size * 2 + gap + header_h + footer_h + label_h * 2
+    w = view_size * cols + gap * (cols - 1)
+    h = view_size * rows + gap * (rows - 1) + header_h + footer_h + label_h * rows
 
     canvas = Image.new("RGB", (w, h), "white")
     draw = ImageDraw.Draw(canvas)
 
     title_font = _get_font(20)
+    subtitle_font = _get_font(14)
     label_font = _get_font(14)
     info_font = _get_font(13)
 
-    # Title
+    # Title + optional subtitle
     draw.text((w // 2, 12), title, fill="black", font=title_font, anchor="mt")
+    if subtitle:
+        draw.text((w // 2, 34), subtitle, fill="#666666", font=subtitle_font, anchor="mt")
 
-    positions = [
-        (0, 0),
-        (view_size + gap, 0),
-        (0, view_size + gap + label_h),
-        (view_size + gap, view_size + gap + label_h),
-    ]
-
-    for idx, ((img, label), (px, py)) in enumerate(zip(images, positions)):
-        y_off = header_h + (label_h if idx < 2 else 0)
-        canvas.paste(img, (px, py + y_off))
-        # Label above each view
-        draw.text((px + view_size // 2, py + y_off - 4), label,
+    for idx, (img, label) in enumerate(images):
+        col = idx % cols
+        row = idx // cols
+        px = col * (view_size + gap)
+        py = header_h + label_h + row * (view_size + gap + label_h)
+        canvas.paste(img, (px, py))
+        draw.text((px + view_size // 2, py - 4), label,
                   fill="#444444", font=label_font, anchor="mb")
 
-    # Footer
-    draw.text((w // 2, h - 12), _info_text(tm),
-              fill="gray", font=info_font, anchor="mb")
+    # Footer (two lines)
+    line1, line2 = _info_lines(tm)
+    draw.text((w // 2, h - 30), line1, fill="gray", font=info_font, anchor="mb")
+    draw.text((w // 2, h - 10), line2, fill="gray", font=info_font, anchor="mb")
 
     canvas.save(output_path)
     return output_path
@@ -428,11 +439,11 @@ def main():
     parser.add_argument("--title", default=None, help="Title for the preview")
     parser.add_argument("--resolution", type=int, default=DEFAULT_VIEW_SIZE,
                         help=f"Pixels per view (default: {DEFAULT_VIEW_SIZE})")
+    parser.add_argument("--subtitle", default=None,
+                        help="Subtitle shown below the title (e.g. model description or usage)")
+    parser.add_argument("--strict", action="store_true",
+                        help="Fail with exit code 2 if the mesh is not watertight")
     args = parser.parse_args()
-
-    if not os.path.exists(args.stl_file):
-        print(f"ERROR: File not found: {args.stl_file}")
-        sys.exit(1)
 
     if args.output is None:
         base = os.path.splitext(args.stl_file)[0]
@@ -441,7 +452,11 @@ def main():
     if args.title is None:
         args.title = os.path.splitext(os.path.basename(args.stl_file))[0].replace("_", " ").title()
 
-    tm = load_mesh(args.stl_file)
+    try:
+        tm = load_mesh(args.stl_file)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     extents = tm.bounding_box.extents
     print(f"Model: {args.stl_file}")
@@ -451,10 +466,16 @@ def main():
     if tm.is_watertight:
         print("Mesh: watertight (good)")
     else:
-        print("WARNING: Mesh is NOT watertight. May cause slicing issues.")
+        print("WARNING: Mesh is NOT watertight. May cause slicing issues.",
+              file=sys.stderr)
+        if args.strict:
+            print("ERROR: --strict set, aborting before render.",
+                  file=sys.stderr)
+            sys.exit(2)
 
     if args.views == "multi":
-        render_multi_view(tm, args.output, args.title, view_size=args.resolution)
+        render_multi_view(tm, args.output, args.title, subtitle=args.subtitle,
+                          view_size=args.resolution)
     else:
         scale = args.resolution / DEFAULT_VIEW_SIZE
         render_single(tm, args.output, args.title,

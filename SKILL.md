@@ -1,6 +1,6 @@
 ---
 name: parametric-3d-printing
-description: "Use this skill whenever the user wants to create, modify, or iterate on 3D printable models. Triggers include: any mention of '3D print', 'STL', 'parametric model', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', 'CAD', or requests to design physical objects. Also use when the user mentions their 3D printer (e.g. Bambu Lab, Prusa, Ender), asks about print-friendly design, snap-fits, tolerances, or wants to create functional parts like Arduino enclosures, cable organizers, wall mounts, adapters, or mechanical components. Use this skill even if the user just describes a physical object they want to make without explicitly mentioning 3D printing. Do NOT use for 3D rendering, game assets, or non-manufacturing 3D work."
+description: "Use this skill when the user wants to design a 3D-printable physical object they intend to manufacture. Triggers: any mention of '3D print', 'STL', 'parametric model', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', or a specific FDM printer (Bambu Lab, Prusa, Ender); questions about print-friendly design, snap-fits, tolerances, or wall thickness; and requests for functional parts like Arduino enclosures, cable organizers, wall mounts, adapters, or mechanical components. Also fires when the user describes a real physical object to make, provided the goal is to manufacture it. Do NOT use for: 3D rendering, animation, game assets, digital-only art, photogrammetry, sculpting, editing an existing STL file the user already has, or any 3D work that is not heading toward a printer."
 ---
 
 # Parametric 3D Printing with CadQuery
@@ -94,9 +94,18 @@ Start with the first two (what + dimensions), then ask about mounting and materi
 Build the model in phases. At each phase, export an STL, render a preview, self-review it, then **show it to the user and ask for feedback** before proceeding. This catches problems early and keeps the user involved.
 
 ### Preview recipe (use at every phase)
+
+**One-shot (run script + render + parse result as JSON):**
+```bash
+python3 run_cadquery_model.py model.py --preview --strict
+```
+This executes `model.py`, finds the STL it wrote, renders the multi-view preview, and emits a JSON result with `success`, `stdout`, `stderr`, `stl`, `preview`, and `watertight`. With `--strict`, a non-watertight mesh is a hard failure. Use this as the default loop: if `success` is false, read the `stderr` field to fix the CadQuery script, then re-run.
+
+**Rendering only (when the STL already exists):**
 ```bash
 python3 preview.py model.stl preview.png --views multi
 ```
+
 Then view the preview image, self-review it against the checklist in `design-review.md`, and fix any issues you spot **before** showing it to the user.
 
 ---
@@ -137,6 +146,32 @@ Apply finishing touches: fillets, chamfers, edge cleanup. Do a full printability
 
 Read `design-review.md` for the full visual inspection checklist, dimensional verification code, and printability analysis helpers.
 
+### Print Recommendations (final delivery)
+
+When you deliver the final STL, always include a one‑line slicer recipe plus a short rationale. Bambu Studio, PrusaSlicer, and OrcaSlicer already set sensible defaults from their filament + process presets, so **do not restate every slicer option**. Only tell the user what matters for *this* model: material, layer height, walls, infill, supports, and orientation. Tweak from the baseline below only when the model needs it.
+
+**Baseline recipe (0.4mm nozzle, typical FDM):**
+> PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports, orientation: flat side on bed.
+
+**When to deviate from the baseline:**
+- **Load‑bearing brackets / hooks / hinges**: bump infill to 25‑40%, 3‑4 walls, consider PETG over PLA for toughness.
+- **Thin decorative walls or vases**: 0 infill, vase mode or 1 wall.
+- **Tall narrow parts**: add a brim for bed adhesion.
+- **Flexible parts (gaskets, grips)**: TPU 95A, 0.2mm layer, slower speed, no supports.
+- **Functional overhangs the geometry can't avoid**: tree supports, or call them out so the user knows.
+- **Outdoor / hot environments**: PETG or ASA, not PLA.
+- **Food / skin contact**: call out that FDM parts are not food‑safe and recommend a food‑safe coating.
+
+**Format at delivery time:**
+```
+Print settings: PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports.
+Orientation: place flat back side on the bed (front face up).
+Why: the case has no overhangs above 45°, and 15% infill is plenty for a
+TPU‑adjacent protective shell.
+```
+
+Keep it to ~3 lines. Never dump every slicer setting; the slicer already knows.
+
 ## Script Template
 
 ALWAYS structure scripts like this:
@@ -171,7 +206,10 @@ result = (
 # ============================================================
 # EXPORT
 # ============================================================
-cq.exporters.export(result, "output.stl")
+# Use tolerance=0.01, angularTolerance=0.1 for consistent tessellation
+# across models. Defaults give coarser, wildly variable STL sizes.
+cq.exporters.export(result, "output.stl",
+                    tolerance=0.01, angularTolerance=0.1)
 print(f"Exported: {width}x{depth}x{height}mm")
 ```
 
@@ -210,14 +248,20 @@ Key FDM design defaults:
 
 Common patterns to know:
 
-**Hollow enclosure:**
+**Hollow enclosure (boolean subtraction, preferred):**
 ```python
-result = (
+outer = (
     cq.Workplane("XY")
     .box(width, depth, height, centered=(True, True, False))
     .edges("|Z").fillet(corner_r)
-    .shell(-wall)  # negative = shell inward
 )
+inner = (
+    cq.Workplane("XY")
+    .workplane(offset=floor_t)
+    .box(width - 2*wall, depth - 2*wall, height, centered=(True, True, False))
+    .edges("|Z").fillet(max(0.1, corner_r - wall))
+)
+result = outer.cut(inner)
 ```
 
 **Screw boss:**
@@ -245,28 +289,39 @@ result = (
 Other patterns: mounting brackets, cable routing channels, text/labels (`.text()`), multi-part assemblies with alignment pins.
 
 ### Common Pitfalls
-- **Zero-thickness geometry**: Ensure boolean operations don't create infinitely thin walls
-- **Fillet failures**: Apply fillets from largest to smallest radius. If a fillet fails, reduce its radius.
-- **Fillet/shell/cut ordering**: The correct sequence is `.shell()` first (hollow out), then `.fillet()` (round edges), then boolean cuts (holes, slots, pockets). Shelling a filleted body often fails, and filleting edges left by cuts is fragile.
-- **Coordinate system**: CadQuery centers geometry at origin by default. Use `centered=(True, True, False)` on `.box()` to place bottom at Z=0.
+
+- **Hollowing: prefer boolean subtraction over `.shell()`**. `.shell()` is fragile. It fails on tapered bodies, lofted shapes, unions of multiple primitives, and anything with many fillets. The reliable pattern is:
+  ```python
+  outer = cq.Workplane("XY").box(w, d, h, centered=(True, True, False)).edges("|Z").fillet(corner_r)
+  inner = (
+      cq.Workplane("XY")
+      .workplane(offset=floor_t)
+      .box(w - 2*wall, d - 2*wall, h, centered=(True, True, False))
+      .edges("|Z").fillet(max(0.1, corner_r - wall))
+  )
+  result = outer.cut(inner)
+  ```
+  Only reach for `.shell()` when the body is a single simple primitive (one `.box()` or `.cylinder()`) with a uniform wall thickness on all sides. If in doubt, use boolean subtraction.
+- **Build order: fillet → cut, not cut → fillet**. Apply fillets while the geometry is still a clean primitive. Once you have cut holes/slots/pockets into a body, filleting the resulting edges often fails or produces bad geometry. Same rule for chamfers.
+- **Fillet failures**: Apply fillets from largest to smallest radius. **Do not wrap fillets in `try/except` to silently shrink the radius.** A fillet failure means the geometry or the radius is wrong; find the root cause (too-large radius, wall thinner than radius, adjacent faces that the fillet would degenerate) and fix that.
+- **Zero-thickness geometry**: Ensure boolean operations don't create infinitely thin walls. Add a small epsilon (0.01mm) when cutting bodies that are meant to pass just through a surface.
+- **Coordinate system**: CadQuery centers geometry at origin by default. Use `centered=(True, True, False)` on `.box()` to place the bottom at Z=0 so `.faces("<Z")` is always the print bed.
 - **Hole direction**: `.hole()` cuts through the entire part by default. Use `.cboreHole()` or `.cskHole()` for counterbore/countersink.
-- **Export errors**: If export fails, the geometry may be invalid. Check for self-intersecting shapes.
 - **Taper direction**: In `.extrude(taper=angle)`, a **positive** taper angle narrows the shape (draft inward), **negative** flares it outward. This is opposite to what many people expect.
-- **Shell on tapered/complex geometry**: `.shell()` frequently fails on tapered bodies, lofted shapes, or geometry with many fillets. The reliable alternative is **boolean subtraction** — create the outer solid, create a slightly smaller inner solid, then use `outer.cut(inner)` to hollow it out. This gives you full control over wall thickness at every point.
-- **Loft is fragile**: CadQuery's `.loft()` fails on many cross-section combinations. Prefer `.extrude(taper=angle)` when transitioning between a shape and a scaled version of itself. Only use `.loft()` when you need to transition between genuinely different profiles (e.g., circle to rectangle).
+- **Loft is fragile**: `.loft()` fails on many cross-section combinations. Prefer `.extrude(taper=angle)` when transitioning between a shape and a scaled version of itself. Only use `.loft()` when you need to transition between genuinely different profiles (e.g., circle to rectangle).
+- **Export errors / non-watertight STL**: If export fails or the preview reports a non-watertight mesh, the geometry is invalid (usually self-intersecting booleans or zero-thickness faces). Fix the cause, don't paper over it. Run `python3 preview.py model.stl --strict` to fail loudly on non-watertight output.
 
 ## Export
 
 ```python
-# STL (for slicing)
-cq.exporters.export(result, "model.stl")
+# STL (for slicing) - always set tolerance + angularTolerance for
+# consistent tessellation. Defaults produce variable file sizes and
+# over-tessellated glyphs on text features.
+cq.exporters.export(result, "model.stl",
+                    tolerance=0.01, angularTolerance=0.1)
 
 # STEP (for further CAD editing)
 cq.exporters.export(result, "model.step")
-
-# Both formats
-for fmt in ["stl", "step"]:
-    cq.exporters.export(result, f"model.{fmt}")
 ```
 
 Always export STL for printing. Optionally export STEP if the user might want to edit in Fusion 360 or similar.
