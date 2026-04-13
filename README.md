@@ -9,6 +9,19 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for genera
 
 Read the full write-up: [I Taught Claude to Design 3D-Printable Parts. Here's How](https://medium.com/@nchourrout/i-taught-claude-to-design-3d-printable-parts-heres-how-675f644af78a)
 
+## More examples
+
+Published on [MakerWorld](https://makerworld.com/en/@sercanto).
+
+<p align="center">
+  <img src="docs/gridfinity_d110_bin_preview.png" alt="Gridfinity 3x2 bin for Orico D110 label printer" width="640">
+</p>
+
+<p align="center">
+  <img src="docs/magnet_catch_preview.png" alt="Magnetic door catch (frame side)" width="640">
+  <img src="docs/magnet_strike_preview.png" alt="Magnetic door catch (door side)" width="640">
+</p>
+
 ## Installation
 
 ```bash
@@ -30,8 +43,10 @@ pip install -r requirements.txt
 | File | Purpose |
 |------|---------|
 | `SKILL.md` | Skill definition and workflow instructions for Claude |
-| `preview.py` | Headless STL to multi-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
+| `preview.py` | Headless STL to 6-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
 | `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, and emits a JSON result so Claude can self-correct in a loop. |
+| `mesh_io.py` | STL loading with validation (no pyrender dependency). Used by the wrapper and converter. |
+| `stl_to_3mf.py` | Standalone STL to 3MF converter for Bambu Studio / PrusaSlicer. |
 | `design-review.md` | Visual inspection checklist and printability analysis |
 | `requirements.txt` | Pinned dependency versions |
 
