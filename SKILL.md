@@ -19,7 +19,7 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install cadquery trimesh pyrender Pillow
 ```
 
-CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow are used for the preview-analyze-iterate loop. No display server is needed — everything renders headlessly via pyrender's offscreen backend.
+CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow are used for the preview-analyze-iterate loop. No display server is needed; everything renders headlessly via pyrender's offscreen backend.
 
 **If CadQuery fails to install** (OCC kernel build errors), try:
 ```bash
@@ -32,7 +32,7 @@ pip install cadquery --find-links https://github.com/CadQuery/CadQuery/releases
 
 ## Real-World Dimension Research
 
-When designing objects that interface with real products (phones, chargers, PCBs, connectors, etc.), **use web search to find accurate dimensions** before writing any geometry code. Don't guess or use approximate values — even 1-2mm off can make a part unusable.
+When designing objects that interface with real products (phones, chargers, PCBs, connectors, etc.), **use web search to find accurate dimensions** before writing any geometry code. Don't guess or use approximate values. Even 1-2mm off can make a part unusable.
 
 **What to research:**
 - Connector/port dimensions (USB-C: 8.4 x 2.6mm opening, Lightning, barrel jacks)
@@ -58,34 +58,34 @@ This is especially important for: phone cases/stands, charger mounts, PCB enclos
 
 1. **Gather requirements** (see Requirements Gathering below)
 2. **Research dimensions** of any real-world products involved (see above)
-3. **Phase 1 — Base shape**: Build outer shell, preview, get user feedback
-4. **Phase 2 — Features**: Add functional details, preview, get user feedback
-5. **Phase 3 — Final delivery**: Fillets, cleanup, final preview + STL + print recommendations
+3. **Phase 1, Base shape**: Build outer shell, preview, get user feedback
+4. **Phase 2, Features**: Add functional details, preview, get user feedback
+5. **Phase 3, Final delivery**: Fillets, cleanup, final preview + STL + print recommendations
 6. **Offer parameter tweaks** after delivery
 
 This is a **collaborative, show-as-you-go** process. Do NOT disappear and come back with a finished model. Show the user your progress at each phase and incorporate their feedback before moving on.
 
 ## Requirements Gathering
 
-Before writing any code, walk through these topics with the user **conversationally**. Don't dump all questions at once — ask the most important ones first, then follow up based on answers. Use reasonable defaults when the user doesn't specify.
+Before writing any code, walk through these topics with the user **conversationally**. Don't dump all questions at once. Ask the most important ones first, then follow up based on answers. Use reasonable defaults when the user doesn't specify.
 
 **What is it?**
 Object type, purpose, what it holds/protects/attaches to. Get a clear mental model of the object before anything else.
 
 **Critical dimensions**
-Must-fit measurements — PCB size, phone width, screw spacing, diameter of the thing it wraps around, etc. These are non-negotiable and drive everything else.
+Must-fit measurements, like PCB size, phone width, screw spacing, diameter of the thing it wraps around, etc. These are non-negotiable and drive everything else.
 
 **Mounting & attachment**
 How does it connect to things? Screws (what size?), snap-fit, adhesive tape, magnets, freestanding on a desk? This affects wall thickness, boss placement, and overall structure.
 
 **Printer & material**
-What printer do they have? (Bambu, Prusa, Ender, etc.) Nozzle size? Material — PLA, PETG, TPU? This directly affects tolerances, minimum feature sizes, and design constraints. Defaults: 0.4mm nozzle, PLA, 0.2mm layer height.
+What printer do they have? (Bambu, Prusa, Ender, etc.) Nozzle size? Material (PLA, PETG, TPU)? This directly affects tolerances, minimum feature sizes, and design constraints. Defaults: 0.4mm nozzle, PLA, 0.2mm layer height.
 
 **Functional needs**
 Ventilation/airflow, water resistance, cable routing, access panels, visibility windows, stacking, weight limits. Ask only what's relevant to the object.
 
 **Aesthetic preferences**
-Rounded vs sharp edges, minimal vs industrial look, color considerations (affects visibility of layer lines). Ask briefly — most users care more about function than form.
+Rounded vs sharp edges, minimal vs industrial look, color considerations (affects visibility of layer lines). Ask briefly. Most users care more about function than form.
 
 Start with the first two (what + dimensions), then ask about mounting and material if relevant. Only ask about aesthetics if the user seems to care or if it affects structural choices.
 
@@ -110,17 +110,17 @@ Then view the preview image, self-review it against the checklist in `design-rev
 
 ---
 
-### Phase 1 — Base Shape
+### Phase 1: Base Shape
 
 Build the basic outer form: overall dimensions, shell/walls, bottom plate. No cutouts, no fillets, no details yet.
 
 1. Write the script with parameters and basic geometry
 2. Export STL and render preview
 3. Self-review: Does the shape and size look right? Is the bottom flat for printing?
-4. **Show the preview to the user**: "Here's the basic shape — does this look right before I add details?" Include key dimensions.
+4. **Show the preview to the user**: "Here's the basic shape. Does this look right before I add details?" Include key dimensions.
 5. Wait for feedback. If the user wants changes, iterate here before moving on.
 
-### Phase 2 — Features
+### Phase 2: Features
 
 Add functional details: holes, cutouts, mounting bosses, cable slots, ventilation, snap-fits, internal structures.
 
@@ -130,13 +130,13 @@ Add functional details: holes, cutouts, mounting bosses, cable slots, ventilatio
 4. **Show the preview to the user**: "I've added [list features]. Anything to change before I finalize?"
 5. Wait for feedback. Iterate if needed.
 
-### Phase 3 — Final Delivery
+### Phase 3: Final Delivery
 
 Apply finishing touches: fillets, chamfers, edge cleanup. Do a full printability review.
 
 1. Add fillets/chamfers (largest radius first, apply after shell)
 2. Export final STL and render preview
-3. **Full self-review** using the complete checklist from `design-review.md` — visual inspection, dimensional verification, printability analysis
+3. **Full self-review** using the complete checklist from `design-review.md`: visual inspection, dimensional verification, printability analysis
 4. Fix any issues found, re-export if needed
 5. **Deliver to the user**: final STL + preview image + print recommendations (orientation, supports, infill, material notes)
 
@@ -148,26 +148,26 @@ Read `design-review.md` for the full visual inspection checklist, dimensional ve
 
 ### Print Recommendations (final delivery)
 
-When you deliver the final STL, always include a one‑line slicer recipe plus a short rationale. Bambu Studio, PrusaSlicer, and OrcaSlicer already set sensible defaults from their filament + process presets, so **do not restate every slicer option**. Only tell the user what matters for *this* model: material, layer height, walls, infill, supports, and orientation. Tweak from the baseline below only when the model needs it.
+When you deliver the final STL, always include a one-line slicer recipe plus a short rationale. Bambu Studio, PrusaSlicer, and OrcaSlicer already set sensible defaults from their filament + process presets, so **do not restate every slicer option**. Only tell the user what matters for *this* model: material, layer height, walls, infill, supports, and orientation. Tweak from the baseline below only when the model needs it.
 
 **Baseline recipe (0.4mm nozzle, typical FDM):**
 > PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports, orientation: flat side on bed.
 
 **When to deviate from the baseline:**
-- **Load‑bearing brackets / hooks / hinges**: bump infill to 25‑40%, 3‑4 walls, consider PETG over PLA for toughness.
+- **Load-bearing brackets / hooks / hinges**: bump infill to 25-40%, 3-4 walls, consider PETG over PLA for toughness.
 - **Thin decorative walls or vases**: 0 infill, vase mode or 1 wall.
 - **Tall narrow parts**: add a brim for bed adhesion.
 - **Flexible parts (gaskets, grips)**: TPU 95A, 0.2mm layer, slower speed, no supports.
 - **Functional overhangs the geometry can't avoid**: tree supports, or call them out so the user knows.
 - **Outdoor / hot environments**: PETG or ASA, not PLA.
-- **Food / skin contact**: call out that FDM parts are not food‑safe and recommend a food‑safe coating.
+- **Food / skin contact**: call out that FDM parts are not food-safe and recommend a food-safe coating.
 
 **Format at delivery time:**
 ```
 Print settings: PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports.
 Orientation: place flat back side on the bed (front face up).
 Why: the case has no overhangs above 45°, and 15% infill is plenty for a
-TPU‑adjacent protective shell.
+TPU-adjacent protective shell.
 ```
 
 Keep it to ~3 lines. Never dump every slicer setting; the slicer already knows.
@@ -359,7 +359,7 @@ Here's your final model! Current parameters:
 Want me to adjust anything? Just say e.g. "make it 5mm taller" or "wider cable slot."
 ```
 
-Only include parameters the user would plausibly want to change — skip internal constants like `eps` or `nozzle_d`. Group them logically (dimensions first, then structural, then tolerances).
+Only include parameters the user would plausibly want to change. Skip internal constants like `eps` or `nozzle_d`. Group them logically (dimensions first, then structural, then tolerances).
 
 ## Output Checklist
 
