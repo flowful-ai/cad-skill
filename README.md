@@ -29,6 +29,15 @@ mkdir -p ~/.claude/skills
 git clone https://github.com/flowful-ai/cad-skill ~/.claude/skills/parametric-3d-printing
 ```
 
+## Usage
+
+Once installed, the skill activates in two ways inside Claude Code:
+
+- **Auto-trigger.** Describe a part you want to print ("design a wall mount for an Arduino Uno", "I need a snap-fit lid for this box") and Claude picks up the skill from its trigger keywords (3D print, STL, CadQuery, enclosure, bracket, and so on).
+- **Explicit slash command.** Type `/parametric-3d-printing` to invoke it directly, useful when your request does not contain the obvious keywords.
+
+Claude will then walk you through requirements, build the model in phases (base shape, features, finish), and deliver an STL plus a rendered preview.
+
 ## Dependencies
 
 Requires **Python 3.10-3.12** (CadQuery's OCC kernel does not have wheels for 3.13+):
