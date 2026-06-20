@@ -55,9 +55,20 @@ def test_json_shape_keys(good_script):
     _, data = run(good_script)
     expected = {
         "success", "script", "stls", "stl", "previews", "preview",
-        "threemfs", "threemf", "watertight", "stdout", "stderr", "returncode",
+        "threemfs", "threemf", "steps", "step", "watertight",
+        "stdout", "stderr", "returncode",
     }
     assert expected.issubset(data.keys())
+
+
+def test_step_discovered(step_script):
+    rc, data = run(step_script)
+    assert rc == 0
+    assert data["success"] is True
+    assert len(data["steps"]) == 1
+    assert data["step"].endswith("step_model.step")
+    # STL is still discovered alongside the STEP.
+    assert data["stl"].endswith("step_model.stl")
 
 
 def test_preview_renders_png(good_script):

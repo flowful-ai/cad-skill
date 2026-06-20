@@ -37,6 +37,20 @@ def good_script(tmp_path):
 
 
 @pytest.fixture
+def step_script(tmp_path):
+    """CadQuery script that writes both an STL and a STEP next to itself."""
+    script = tmp_path / "step_model.py"
+    script.write_text(
+        "import cadquery as cq\n"
+        "r = cq.Workplane('XY').box(10, 10, 10)\n"
+        "cq.exporters.export(r, 'step_model.stl',"
+        " tolerance=0.01, angularTolerance=0.1)\n"
+        "cq.exporters.export(r, 'step_model.step')\n"
+    )
+    return script
+
+
+@pytest.fixture
 def bad_script(tmp_path):
     """CadQuery script that raises (fillet radius too large)."""
     script = tmp_path / "bad.py"

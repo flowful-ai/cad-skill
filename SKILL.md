@@ -16,10 +16,10 @@ This skill generates parametric 3D models using **CadQuery** (Python) and export
 python3.12 -m venv .venv && source .venv/bin/activate
 
 # Install CadQuery and preview dependencies
-pip install cadquery trimesh pyrender Pillow
+pip install cadquery trimesh pyrender Pillow numpy lxml
 ```
 
-CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow are used for the preview-analyze-iterate loop. No display server is needed; everything renders headlessly via pyrender's offscreen backend.
+CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, Pillow, and numpy are used for the preview-analyze-iterate loop; lxml is required by the 3MF writer (`stl_to_3mf.py`). No display server is needed; everything renders headlessly via pyrender's offscreen backend.
 
 **If CadQuery fails to install** (OCC kernel build errors), try:
 ```bash

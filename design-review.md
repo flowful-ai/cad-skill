@@ -25,7 +25,7 @@ python3 preview.py model.stl preview.png --views multi
 
 ### Step 2: View the Preview
 
-Read the generated PNG file to inspect it visually. The multi-view layout shows the model from 4 angles (isometric, front, top, right) with dimensions in the footer.
+Read the generated PNG file to inspect it visually. The multi-view layout shows the model from 6 angles (isometric, front, right, back-isometric, top, bottom) with dimensions in the footer.
 
 ### Step 3: Analyze the Preview
 

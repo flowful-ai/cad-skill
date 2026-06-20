@@ -9,8 +9,9 @@ Usage:
     python3 run_cadquery_model.py path/to/model.py --preview            # also render
     python3 run_cadquery_model.py path/to/model.py --preview --strict   # fail on non-watertight
 
-3MF files produced by the script (via cq.exporters.export(result, "name.3mf"))
-are discovered automatically and reported alongside the STLs.
+3MF and STEP files produced by the script (via cq.exporters.export(result,
+"name.3mf") / cq.exporters.export(result, "name.step")) are discovered
+automatically and reported alongside the STLs.
 
 Emits a single JSON object to stdout (key order matches the emitted JSON):
     {
@@ -22,6 +23,8 @@ Emits a single JSON object to stdout (key order matches the emitted JSON):
       "preview": "a_preview.png",           # newest, for single-file convenience
       "threemfs": ["a.3mf", "b.3mf"],       # every .3mf produced by the script
       "threemf": "a.3mf",                   # newest, for single-file convenience
+      "steps": ["a.step", "b.step"],        # every .step produced by the script
+      "step": "a.step",                     # newest, for single-file convenience
       "watertight": true/false/null,        # true only if ALL meshes are watertight
       "stdout": "...",
       "stderr": "...",
@@ -143,7 +146,7 @@ def main():
                         help="Fail with exit code 1 if any STL is not watertight, "
                              "or if the script produced no STL at all")
     parser.add_argument("--views", choices=["iso", "multi"], default="multi",
-                        help="Preview layout: 'iso' (single isometric) or 'multi' (4-view) (default: multi)")
+                        help="Preview layout: 'iso' (single isometric) or 'multi' (6-view) (default: multi)")
     parser.add_argument("--timeout", type=int, default=180,
                         help="Seconds before killing the model script (default: 180)")
     args = parser.parse_args()
@@ -160,6 +163,8 @@ def main():
         "preview": None,
         "threemfs": [],
         "threemf": None,
+        "steps": [],
+        "step": None,
         "watertight": None,
         "stdout": "",
         "stderr": "",
@@ -191,9 +196,12 @@ def main():
     result["success"] = proc.returncode == 0
 
     if result["success"]:
-        found = _new_files_by_ext(script_dir, started, ("stl", "3mf"))
+        found = _new_files_by_ext(script_dir, started, ("stl", "3mf", "step", "stp"))
         result["stls"] = found["stl"]
         result["threemfs"] = found["3mf"]
+        # CadQuery writes .step by convention; .stp is accepted too. Both
+        # are merged into one list (newest-first within each extension).
+        result["steps"] = found["step"] + found["stp"]
 
     # --strict implies the run must produce at least one STL. A script that
     # exits 0 but forgot to call cq.exporters.export() would otherwise slip
@@ -218,6 +226,7 @@ def main():
     result["stl"] = result["stls"][0] if result["stls"] else None
     result["preview"] = result["previews"][0] if result["previews"] else None
     result["threemf"] = result["threemfs"][0] if result["threemfs"] else None
+    result["step"] = result["steps"][0] if result["steps"] else None
 
     print(json.dumps(result, indent=2))
     sys.exit(0 if result["success"] else 1)
