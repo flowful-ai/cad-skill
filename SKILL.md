@@ -1,6 +1,6 @@
 ---
 name: parametric-3d-printing
-description: "Use this skill when the user wants to design a 3D-printable physical object they intend to manufacture. Triggers: any mention of '3D print', 'STL', 'parametric model', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', or a specific FDM printer (Bambu Lab, Prusa, Ender); questions about print-friendly design, snap-fits, tolerances, or wall thickness; and requests for functional parts like Arduino enclosures, cable organizers, wall mounts, adapters, or mechanical components. Also fires when the user describes a real physical object to make, provided the goal is to manufacture it. Do NOT use for: 3D rendering, animation, game assets, digital-only art, photogrammetry, sculpting, editing an existing STL file the user already has, or any 3D work that is not heading toward a printer."
+description: "Use this skill when the user wants to design a 3D-printable physical object they intend to manufacture. Triggers: any mention of '3D print', 'STL', 'parametric model', 'Gridfinity', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', or a specific FDM printer (Bambu Lab, Prusa, Ender); questions about print-friendly design, snap-fits, tolerances, or wall thickness; and requests for functional parts like Arduino enclosures, cable organizers, wall mounts, adapters, or mechanical components. Also fires when the user describes a real physical object to make, provided the goal is to manufacture it. Do NOT use for: 3D rendering, animation, game assets, digital-only art, photogrammetry, sculpting, editing an existing STL file the user already has, or any 3D work that is not heading toward a printer."
 ---
 
 # Parametric 3D Printing with CadQuery
@@ -337,6 +337,41 @@ cq.exporters.export(lid, "enclosure_lid.stl")
 ```
 
 Name files descriptively so the user knows which part is which.
+
+## Gridfinity Bins
+
+For any Gridfinity request (bins, inserts, cradles for the 42mm modular grid system), **use the bundled `gridfinity.py` module; never hand-roll the base profile**. The module is tested, spec-compatible (base profile, stacking lip, 6x2mm magnet bores, M3 screw holes on the 26mm square), and validates parameters with actionable errors.
+
+**Workflow:**
+1. Copy `gridfinity.py` from this skill's directory next to the model script (it is a vendored module; generated scripts must stay runnable standalone).
+2. Build with the `GridfinityBin` API:
+
+```python
+import cadquery as cq
+from gridfinity import GridfinityBin
+
+bin = GridfinityBin(grid_x=3, grid_y=2, height_units=3,
+                    stacking_lip=True, magnets=False)
+bin.add_pocket(length=88.6, width=72.6, corner_r=(12.0, 1.0))  # cradle
+# or: bin.add_compartments(cols=3, rows=2, scoop_r=6, label_tab=True)
+# or: bin.add_polygon_pocket(points, depth=15, clearance=0.3)
+# or: bin.add_finger_notch(side="+Y", width=20)
+result = bin.build()
+cq.exporters.export(result, "my_bin.stl", tolerance=0.01, angularTolerance=0.1)
+print(bin.summary())
+```
+
+**Cheat sheet (spec numbers the API already encodes):**
+- Grid pitch 42mm, height unit 7mm. A bin is `grid_x * 42 - 0.5` mm wide.
+- The stacking lip adds 4.75mm above `height_units * 7`.
+- Interior floor sits at Z=6.75mm by default (4.75 base + 2.0 floor); usable cavity depth is `bin.max_depth`.
+- Sizing an object pocket: add 0.3mm per side fit clearance, plus ~1mm per side if the object must drop in and out easily.
+- Height choice: whatever holds the contents; the contents may protrude above the rim (see `examples/gridfinity_d110_bin.py`).
+- `magnets=True` needs a magnetic baseplate; skip it for drawer bins.
+
+`build()` raises `GridfinityError` with a specific message when a pocket is too big, a wall too thin, or the floor too shallow for screws. Fix the parameters; do not bypass the validation.
+
+If the user asks for something the module does not cover (baseplates, odd lips), fall back to custom geometry but keep the spec constants from `gridfinity.py` as the source of truth. When delivering a release, ship `gridfinity.py` alongside the model script.
 
 ## Parameter Adjustment Offer
 

@@ -85,7 +85,10 @@ The original hand-rolled `gridfinity_d110_bin.py` at the repo root is left untou
   compartments): each build exports watertight with the expected bounding box
   (grid x 42 - 0.5 mm, height = units x 7 + 4.75 if lip).
 - D110 regression: rebuild via the module, assert footprint 125.5 x 83.5 mm,
-  total height 46.75 mm, pocket 88.6 x 72.6 x 34.5 mm.
+  total height 25.75 mm (3U + lip; the printer protrudes above the rim),
+  pocket 88.6 x 72.6 mm reaching the floor at Z=6.75 mm. Note: the header
+  comments in the original script ("total height = 42mm") are stale; the
+  shipped STL measures 125.5 x 83.5 x 25.45 and is the reference.
 - Validation tests: oversized pocket, too-deep pocket, thin dividers all raise.
 
 ## Out of scope (future rounds)
