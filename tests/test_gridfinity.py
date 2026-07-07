@@ -71,22 +71,38 @@ def test_compartments_scoop_label(tmp_path):
         GridfinityBin(2, 2, 4).add_compartments(cols=3, rows=2))
 
 
-def test_polygon_pocket_with_clearance(tmp_path):
+def test_polygon_pocket_with_clearance_and_cylinder_well(tmp_path):
     hexagon = [(25 * math.cos(a), 25 * math.sin(a))
                for a in [i * math.pi / 3 for i in range(6)]]
     bin = GridfinityBin(2, 2, 4).add_polygon_pocket(
         hexagon, depth=15.0, clearance=0.3)
+    # Overlapping cylinder well merges with the polygon cavity.
+    bin.add_cylinder_pocket(diameter=14.0, center=(25.0, 0.0))
     m = _mesh(bin.build(), tmp_path)
     assert m.is_watertight
     _assert_footprint(m, 2, 2)
 
 
+def test_oversized_cylinder_pocket_raises():
+    bin = GridfinityBin(1, 1, 3).add_cylinder_pocket(diameter=41.0)
+    with pytest.raises(GridfinityError, match="cylinder"):
+        bin.build()
+
+
 def test_finger_notch_removes_material(tmp_path):
-    notched_bin = GridfinityBin(1, 1, 4).add_finger_notch("+Y", width=15.0)
+    notched_bin = GridfinityBin(1, 1, 4).add_finger_notch(
+        "+Y", width=15.0, offset=8.0)
     built = notched_bin.build()
     m = _mesh(built, tmp_path, "notched.stl")
     assert m.is_watertight
     assert built.val().Volume() < _volume(GridfinityBin(1, 1, 4))
+
+
+def test_notch_offset_past_wall_raises():
+    bin = GridfinityBin(1, 1, 4).add_finger_notch("+Y", width=15.0,
+                                                  offset=15.0)
+    with pytest.raises(GridfinityError, match="offset"):
+        bin.build()
 
 
 # ------------------------------------------------------------

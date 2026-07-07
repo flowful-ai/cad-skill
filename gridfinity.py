@@ -86,10 +86,17 @@ class _Compartments(NamedTuple):
     label_d: float
 
 
+class _CylinderPocket(NamedTuple):
+    diameter: float
+    depth: float
+    center: tuple
+
+
 class _Notch(NamedTuple):
     side: str
     width: float
     depth: float
+    offset: float
 
 
 def _corner_radii(corner_r):
@@ -138,12 +145,21 @@ def _compound(parts):
     """Collect the solids of several workplanes/solids into one Compound.
 
     Booleans against a single compound are much cheaper than one OCC
-    operation per feature.
+    operation per feature. ONLY safe when the solids are disjoint or
+    the boolean is a fuse; CUTTING with a compound of overlapping tools
+    leaves internal faces. Use _fused for cutters that may overlap.
     """
     solids = []
     for p in parts:
         solids.extend(p.vals() if isinstance(p, cq.Workplane) else [p])
     return cq.Compound.makeCompound(solids)
+
+
+def _fused(parts):
+    """Fuse workplanes into one solid tool, resolving any overlaps."""
+    if len(parts) == 1:
+        return parts[0]
+    return parts[0].union(_compound(parts[1:]))
 
 
 class GridfinityBin:
@@ -165,6 +181,7 @@ class GridfinityBin:
         self.floor_t = floor_t
         self._pockets = []
         self._polygon_pockets = []
+        self._cylinder_pockets = []
         self._compartments = None
         self._notches = []
 
@@ -223,6 +240,17 @@ class GridfinityBin:
             clearance))
         return self
 
+    def add_cylinder_pocket(self, diameter, depth=None, center=(0.0, 0.0)):
+        """Round cavity cut from the top rim down `depth` mm.
+
+        Useful for finger wells next to an object pocket, batteries,
+        coins, dowels. Overlapping another pocket merges the cavities.
+        `depth=None` reaches the floor.
+        """
+        self._cylinder_pockets.append(_CylinderPocket(
+            diameter, self.max_depth if depth is None else depth, center))
+        return self
+
     def add_compartments(self, cols=1, rows=1, wall_t=MIN_WALL,
                          scoop_r=0.0, label_tab=False, label_d=12.0):
         """Classic divided storage interior: cols x rows compartments.
@@ -237,14 +265,17 @@ class GridfinityBin:
             cols, rows, wall_t, scoop_r, label_tab, label_d)
         return self
 
-    def add_finger_notch(self, side="+X", width=20.0, depth=None):
+    def add_finger_notch(self, side="+X", width=20.0, depth=None,
+                         offset=0.0):
         """U-shaped scallop cut into one side wall from the top rim.
 
         `side` is one of "+X", "-X", "+Y", "-Y". `depth` defaults to
-        half the bin height, measured from the top rim.
+        half the bin height, measured from the top rim. `offset` slides
+        the notch along the wall from its center (mm, signed).
         """
         self._notches.append(_Notch(
-            side, width, self.total_h / 2 if depth is None else depth))
+            side, width, self.total_h / 2 if depth is None else depth,
+            offset))
         return self
 
     # ------------------------------------------------------------
@@ -295,6 +326,15 @@ class GridfinityBin:
                     "polygon pocket (plus clearance) leaves less than "
                     f"{MIN_WALL}mm of outer wall")
 
+        for p in self._cylinder_pockets:
+            self._check_depth(p.depth, "cylinder pocket")
+            cx, cy = p.center
+            if (abs(cx) + p.diameter / 2 > self.outer_w / 2 - MIN_WALL or
+                    abs(cy) + p.diameter / 2 > self.outer_d / 2 - MIN_WALL):
+                raise GridfinityError(
+                    f"cylinder pocket d={p.diameter}mm at {p.center} leaves "
+                    f"less than {MIN_WALL}mm of outer wall")
+
         c = self._compartments
         if c:
             if c.wall_t < MIN_WALL:
@@ -318,6 +358,12 @@ class GridfinityBin:
             if n.depth < n.width / 2:
                 raise GridfinityError("notch depth must be >= width/2")
             self._check_depth(n.depth, "finger notch")
+            wall_half = (self.outer_d if n.side in ("+X", "-X")
+                         else self.outer_w) / 2
+            if abs(n.offset) + n.width / 2 > wall_half - CORNER_R:
+                raise GridfinityError(
+                    f"notch offset {n.offset}mm pushes it past the wall "
+                    f"(usable half-span {wall_half - CORNER_R:.1f}mm)")
 
     def _check_depth(self, depth, what):
         if depth > self.max_depth + _EPS:
@@ -349,18 +395,19 @@ class GridfinityBin:
         # after the unions so a notch can pass through a scoop.
         cutters = [self._pocket_cut(p) for p in self._pockets]
         cutters += [self._polygon_cut(p) for p in self._polygon_pockets]
+        cutters += [self._cylinder_cut(p) for p in self._cylinder_pockets]
         adds = []
         if self._compartments:
             comp_cutters, comp_adds = self._compartment_solids()
             cutters += comp_cutters
             adds += comp_adds
         if cutters:
-            solid = solid.cut(_compound(cutters))
+            solid = solid.cut(_fused(cutters))
         if adds:
             solid = solid.union(_compound(adds))
         if self._notches:
             solid = solid.cut(
-                _compound([self._notch_cut(n) for n in self._notches]))
+                _fused([self._notch_cut(n) for n in self._notches]))
         if self.magnets or self.screws:
             solid = solid.cut(self._base_hole_cutter())
 
@@ -434,6 +481,13 @@ class GridfinityBin:
             wp = wp.offset2D(p.clearance)
         return wp.extrude(p.depth + 1)
 
+    def _cylinder_cut(self, p):
+        return (cq.Workplane("XY")
+                .workplane(offset=self.total_h - p.depth)
+                .pushPoints([p.center])
+                .circle(p.diameter / 2)
+                .extrude(p.depth + 1))
+
     def _compartment_solids(self):
         """Cutters (cavities) and additions (scoops, label shelves)."""
         c = self._compartments
@@ -502,6 +556,11 @@ class GridfinityBin:
         angle = {"+X": 0, "+Y": 90, "-X": 180, "-Y": 270}[n.side]
         if angle:
             cutter = cutter.rotate((0, 0, 0), (0, 0, 1), angle)
+        if n.offset:
+            # Slide along the wall: the +-X walls span Y, +-Y walls span X.
+            shift = ((0, n.offset, 0) if n.side in ("+X", "-X")
+                     else (n.offset, 0, 0))
+            cutter = cutter.translate(shift)
         return cutter
 
     def _base_hole_cutter(self):
