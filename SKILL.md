@@ -361,15 +361,13 @@ cq.exporters.export(result, "my_bin.stl", tolerance=0.01, angularTolerance=0.1)
 print(bin.summary())
 ```
 
-**Cheat sheet (spec numbers the API already encodes):**
-- Grid pitch 42mm, height unit 7mm. A bin is `grid_x * 42 - 0.5` mm wide.
-- The stacking lip adds 4.75mm above `height_units * 7`.
-- Interior floor sits at Z=6.75mm by default (4.75 base + 2.0 floor); usable cavity depth is `bin.max_depth`.
+**Cheat sheet:**
+- Spec constants: grid pitch 42mm, height unit 7mm. Every derived number (footprint, lip height, floor Z, usable cavity depth) is exposed on the builder: `bin.outer_w`, `bin.outer_d`, `bin.total_h`, `bin.floor_z`, `bin.max_depth`, and `bin.summary()` prints them all. Read those instead of recomputing.
 - Sizing an object pocket: add 0.3mm per side fit clearance, plus ~1mm per side if the object must drop in and out easily.
 - Height choice: whatever holds the contents; the contents may protrude above the rim (see `examples/gridfinity_d110_bin.py`).
 - `magnets=True` needs a magnetic baseplate; skip it for drawer bins.
 
-`build()` raises `GridfinityError` with a specific message when a pocket is too big, a wall too thin, or the floor too shallow for screws. Fix the parameters; do not bypass the validation.
+The builder raises `GridfinityError` with a specific message when a pocket is too big, a wall too thin, or the floor too shallow for screws (a few checks fire in the `add_*` calls, the rest in `build()`). Fix the parameters; do not bypass the validation.
 
 If the user asks for something the module does not cover (baseplates, odd lips), fall back to custom geometry but keep the spec constants from `gridfinity.py` as the source of truth. When delivering a release, ship `gridfinity.py` alongside the model script.
 

@@ -26,6 +26,8 @@ Geometry conventions:
   height; the lip cut opens everything above it.
 """
 
+from typing import NamedTuple
+
 import cadquery as cq
 
 # ============================================================
@@ -44,7 +46,11 @@ MAGNET_DEPTH = 2.4
 SCREW_D = 3.0            # M3 thread-forming
 SCREW_DEPTH = 6.0
 HOLE_SPACING = 26.0      # magnet/screw centers, square per cell
-MIN_WALL = 1.2           # FDM minimum wall
+
+# ============================================================
+# PRINTABILITY DEFAULTS (mm) - 0.4mm-nozzle FDM, tunable
+# ============================================================
+MIN_WALL = 1.2           # minimum wall/divider thickness
 DEFAULT_FLOOR = 2.0      # solid floor above the base profile
 TOP_CHAMFER = 0.6        # rim edge chamfer
 
@@ -55,6 +61,35 @@ _EPS = 0.01
 
 class GridfinityError(ValueError):
     """Raised when a bin configuration cannot produce valid geometry."""
+
+
+class _Pocket(NamedTuple):
+    length: float
+    width: float
+    depth: float
+    radii: tuple
+    center: tuple
+
+
+class _PolygonPocket(NamedTuple):
+    points: list
+    depth: float
+    clearance: float
+
+
+class _Compartments(NamedTuple):
+    cols: int
+    rows: int
+    wall_t: float
+    scoop_r: float
+    label_tab: bool
+    label_d: float
+
+
+class _Notch(NamedTuple):
+    side: str
+    width: float
+    depth: float
 
 
 def _corner_radii(corner_r):
@@ -99,6 +134,18 @@ def _rounded_rect(workplane, length, width, radii, center=(0.0, 0.0)):
     return wp.close()
 
 
+def _compound(parts):
+    """Collect the solids of several workplanes/solids into one Compound.
+
+    Booleans against a single compound are much cheaper than one OCC
+    operation per feature.
+    """
+    solids = []
+    for p in parts:
+        solids.extend(p.vals() if isinstance(p, cq.Workplane) else [p])
+    return cq.Compound.makeCompound(solids)
+
+
 class GridfinityBin:
     """Builder for a spec-compatible Gridfinity bin.
 
@@ -108,8 +155,7 @@ class GridfinityBin:
 
     def __init__(self, grid_x, grid_y, height_units,
                  stacking_lip=True, magnets=False, screws=False,
-                 floor_t=DEFAULT_FLOOR, corner_r=CORNER_R,
-                 top_chamfer=TOP_CHAMFER):
+                 floor_t=DEFAULT_FLOOR):
         self.grid_x = grid_x
         self.grid_y = grid_y
         self.height_units = height_units
@@ -117,8 +163,6 @@ class GridfinityBin:
         self.magnets = magnets
         self.screws = screws
         self.floor_t = floor_t
-        self.corner_r = corner_r
-        self.top_chamfer = top_chamfer
         self._pockets = []
         self._polygon_pockets = []
         self._compartments = None
@@ -163,10 +207,9 @@ class GridfinityBin:
         `corner_r`: scalar, (-X end, +X end) 2-tuple, or 4-tuple
         (+X+Y, -X+Y, -X-Y, +X-Y). `depth=None` reaches the floor.
         """
-        self._pockets.append({
-            "length": length, "width": width, "depth": depth,
-            "radii": _corner_radii(corner_r), "center": center,
-        })
+        self._pockets.append(_Pocket(
+            length, width, self.max_depth if depth is None else depth,
+            _corner_radii(corner_r), center))
         return self
 
     def add_polygon_pocket(self, points, depth=None, clearance=0.0):
@@ -175,9 +218,9 @@ class GridfinityBin:
         `clearance` offsets the outline outward, e.g. to add fit
         clearance around a traced object. `depth=None` reaches the floor.
         """
-        self._polygon_pockets.append({
-            "points": list(points), "depth": depth, "clearance": clearance,
-        })
+        self._polygon_pockets.append(_PolygonPocket(
+            list(points), self.max_depth if depth is None else depth,
+            clearance))
         return self
 
     def add_compartments(self, cols=1, rows=1, wall_t=MIN_WALL,
@@ -188,10 +231,10 @@ class GridfinityBin:
         compartment; `label_tab` adds a 45-degree label shelf along the
         back (+Y) of every row, `label_d` mm deep.
         """
-        self._compartments = {
-            "cols": cols, "rows": rows, "wall_t": wall_t,
-            "scoop_r": scoop_r, "label_tab": label_tab, "label_d": label_d,
-        }
+        if self._compartments is not None:
+            raise GridfinityError("add_compartments can only be called once")
+        self._compartments = _Compartments(
+            cols, rows, wall_t, scoop_r, label_tab, label_d)
         return self
 
     def add_finger_notch(self, side="+X", width=20.0, depth=None):
@@ -200,7 +243,8 @@ class GridfinityBin:
         `side` is one of "+X", "-X", "+Y", "-Y". `depth` defaults to
         half the bin height, measured from the top rim.
         """
-        self._notches.append({"side": side, "width": width, "depth": depth})
+        self._notches.append(_Notch(
+            side, width, self.total_h / 2 if depth is None else depth))
         return self
 
     # ------------------------------------------------------------
@@ -217,11 +261,6 @@ class GridfinityBin:
             raise GridfinityError(
                 f"bin too short: nominal height {self.nominal_h}mm does not "
                 f"clear the floor at {self.floor_z}mm; increase height_units")
-        base_sketch_r = self.corner_r - _INSET_BOT
-        if base_sketch_r < 0.4:
-            raise GridfinityError(
-                f"corner_r {self.corner_r}mm too small; must be >= "
-                f"{_INSET_BOT + 0.4}mm so the base corners stay printable")
         if self.screws and self.floor_z < SCREW_DEPTH + 0.6:
             raise GridfinityError(
                 f"screw holes are {SCREW_DEPTH}mm deep; floor_t must be >= "
@@ -229,71 +268,70 @@ class GridfinityBin:
                 f"membrane above them")
 
         for p in self._pockets:
-            self._check_depth(p["depth"], "pocket")
-            cx, cy = p["center"]
-            if (abs(cx) + p["length"] / 2 > self.outer_w / 2 - MIN_WALL or
-                    abs(cy) + p["width"] / 2 > self.outer_d / 2 - MIN_WALL):
+            self._check_depth(p.depth, "pocket")
+            cx, cy = p.center
+            if (abs(cx) + p.length / 2 > self.outer_w / 2 - MIN_WALL or
+                    abs(cy) + p.width / 2 > self.outer_d / 2 - MIN_WALL):
                 raise GridfinityError(
-                    f"pocket {p['length']}x{p['width']}mm at {p['center']} "
+                    f"pocket {p.length}x{p.width}mm at {p.center} "
                     f"leaves less than {MIN_WALL}mm of outer wall "
                     f"(interior is {self.outer_w - 2 * MIN_WALL:.1f}x"
                     f"{self.outer_d - 2 * MIN_WALL:.1f}mm)")
-            ra, rb, rc, rd = p["radii"]
-            if (ra + rb > p["length"] or rc + rd > p["length"] or
-                    rb + rc > p["width"] or ra + rd > p["width"]):
+            ra, rb, rc, rd = p.radii
+            if (ra + rb > p.length or rc + rd > p.length or
+                    rb + rc > p.width or ra + rd > p.width):
                 raise GridfinityError("pocket corner radii exceed pocket size")
 
         for p in self._polygon_pockets:
-            if len(p["points"]) < 3:
+            if len(p.points) < 3:
                 raise GridfinityError("polygon pocket needs >= 3 points")
-            self._check_depth(p["depth"], "polygon pocket")
-            xs = [pt[0] for pt in p["points"]]
-            ys = [pt[1] for pt in p["points"]]
-            grow = p["clearance"]
-            if (max(map(abs, xs)) + grow > self.outer_w / 2 - MIN_WALL or
-                    max(map(abs, ys)) + grow > self.outer_d / 2 - MIN_WALL):
+            self._check_depth(p.depth, "polygon pocket")
+            xs = [pt[0] for pt in p.points]
+            ys = [pt[1] for pt in p.points]
+            if (max(map(abs, xs)) + p.clearance > self.outer_w / 2 - MIN_WALL
+                    or max(map(abs, ys)) + p.clearance
+                    > self.outer_d / 2 - MIN_WALL):
                 raise GridfinityError(
                     "polygon pocket (plus clearance) leaves less than "
                     f"{MIN_WALL}mm of outer wall")
 
         c = self._compartments
         if c:
-            if c["wall_t"] < MIN_WALL:
+            if c.wall_t < MIN_WALL:
                 raise GridfinityError(f"divider wall_t must be >= {MIN_WALL}mm")
-            comp_w, comp_d = self._compartment_size()
+            comp_w, comp_d, _, _ = self._compartment_size()
             if comp_w < 5 or comp_d < 5:
                 raise GridfinityError(
                     f"compartments are {comp_w:.1f}x{comp_d:.1f}mm; "
                     "reduce cols/rows or wall_t (5mm minimum)")
-            if c["scoop_r"] > min(comp_d, self.nominal_h - self.floor_z):
+            if c.scoop_r > min(comp_d, self.nominal_h - self.floor_z):
                 raise GridfinityError("scoop_r too large for the compartment")
-            if c["label_tab"] and c["label_d"] > min(
+            if c.label_tab and c.label_d > min(
                     comp_d, self.nominal_h - self.floor_z):
                 raise GridfinityError("label_d too large for the compartment")
 
         for n in self._notches:
-            if n["side"] not in ("+X", "-X", "+Y", "-Y"):
+            if n.side not in ("+X", "-X", "+Y", "-Y"):
                 raise GridfinityError('notch side must be "+X", "-X", "+Y" or "-Y"')
-            if n["width"] < 2:
+            if n.width < 2:
                 raise GridfinityError("notch width must be >= 2mm")
-            depth = n["depth"] if n["depth"] is not None else self.total_h / 2
-            if depth < n["width"] / 2:
+            if n.depth < n.width / 2:
                 raise GridfinityError("notch depth must be >= width/2")
-            self._check_depth(depth, "finger notch")
+            self._check_depth(n.depth, "finger notch")
 
     def _check_depth(self, depth, what):
-        if depth is not None and depth > self.max_depth + _EPS:
+        if depth > self.max_depth + _EPS:
             raise GridfinityError(
                 f"{what} depth {depth}mm exceeds max {self.max_depth:.2f}mm "
                 f"({self.floor_t}mm floor above the {BASE_H}mm base)")
 
     def _compartment_size(self):
         c = self._compartments
-        interior_w = self.outer_w - 2 * c["wall_t"]
-        interior_d = self.outer_d - 2 * c["wall_t"]
-        comp_w = (interior_w - (c["cols"] - 1) * c["wall_t"]) / c["cols"]
-        comp_d = (interior_d - (c["rows"] - 1) * c["wall_t"]) / c["rows"]
-        return comp_w, comp_d
+        interior_w = self.outer_w - 2 * c.wall_t
+        interior_d = self.outer_d - 2 * c.wall_t
+        comp_w = (interior_w - (c.cols - 1) * c.wall_t) / c.cols
+        comp_d = (interior_d - (c.rows - 1) * c.wall_t) / c.rows
+        return comp_w, comp_d, interior_w, interior_d
 
     # ------------------------------------------------------------
     # Geometry
@@ -302,20 +340,29 @@ class GridfinityBin:
         """Validate and build; returns a cq.Workplane, bottom at Z=0."""
         self._validate()
 
-        solid = self._base_cells().union(self._body())
+        solid = self._body().union(self._base_cells())
         if self.stacking_lip:
             solid = solid.cut(self._lip_cut())
 
-        for p in self._pockets:
-            solid = solid.cut(self._pocket_cut(p))
-        for p in self._polygon_pockets:
-            solid = solid.cut(self._polygon_cut(p))
+        # Batch all interior cutters into one boolean, then all added
+        # material (scoops, label shelves) into one union. Notches come
+        # after the unions so a notch can pass through a scoop.
+        cutters = [self._pocket_cut(p) for p in self._pockets]
+        cutters += [self._polygon_cut(p) for p in self._polygon_pockets]
+        adds = []
         if self._compartments:
-            solid = self._apply_compartments(solid)
-        for n in self._notches:
-            solid = solid.cut(self._notch_cut(n))
+            comp_cutters, comp_adds = self._compartment_solids()
+            cutters += comp_cutters
+            adds += comp_adds
+        if cutters:
+            solid = solid.cut(_compound(cutters))
+        if adds:
+            solid = solid.union(_compound(adds))
+        if self._notches:
+            solid = solid.cut(
+                _compound([self._notch_cut(n) for n in self._notches]))
         if self.magnets or self.screws:
-            solid = self._cut_base_holes(solid)
+            solid = solid.cut(self._base_hole_cutter())
 
         return solid.clean()
 
@@ -327,28 +374,27 @@ class GridfinityBin:
     def _base_cells(self):
         """Per-cell base profile: taper, riser, taper (45 degrees).
 
-        The sketch fillet starts at corner_r - 2.95 so the corner radius
-        grows through the tapers to exactly corner_r at the top, flowing
+        The sketch fillet starts at CORNER_R - 2.95 so the corner radius
+        grows through the tapers to exactly CORNER_R at the top, flowing
         into the body fillet with no step (spec radii 0.8 / 1.6 / 3.75).
+        All cells are identical: build one at the origin and translate
+        copies to each grid position.
         """
         cell_size = GRID_PITCH - 2 * CLEARANCE
         cell_bot = cell_size - 2 * _INSET_BOT
-        sketch_r = self.corner_r - _INSET_BOT
 
-        base = None
-        for cx, cy in self._cell_centers():
-            cell = (
-                cq.Workplane("XY")
-                .transformed(offset=(cx, cy, 0))
-                .sketch().rect(cell_bot, cell_bot)
-                .vertices().fillet(sketch_r).finalize()
-                .extrude(TAPER_1, taper=-45)
-            )
-            cell = cell.faces(">Z").wires().toPending().extrude(RISER)
-            cell = (cell.faces(">Z").wires().toPending()
-                    .extrude(TAPER_2, taper=-45))
-            base = cell if base is None else base.union(cell)
-        return base
+        cell = (
+            cq.Workplane("XY")
+            .sketch().rect(cell_bot, cell_bot)
+            .vertices().fillet(CORNER_R - _INSET_BOT).finalize()
+            .extrude(TAPER_1, taper=-45)
+        )
+        cell = cell.faces(">Z").wires().toPending().extrude(RISER)
+        cell = (cell.faces(">Z").wires().toPending()
+                .extrude(TAPER_2, taper=-45))
+        solid = cell.val()
+        return _compound([solid.translate(cq.Vector(cx, cy, 0))
+                          for cx, cy in self._cell_centers()])
 
     def _body(self):
         return (
@@ -356,8 +402,8 @@ class GridfinityBin:
             .transformed(offset=(0, 0, BASE_H))
             .box(self.outer_w, self.outer_d, self.total_h - BASE_H,
                  centered=(True, True, False))
-            .edges("|Z").fillet(self.corner_r)
-            .edges(">Z").chamfer(self.top_chamfer)
+            .edges("|Z").fillet(CORNER_R)
+            .edges(">Z").chamfer(TOP_CHAMFER)
         )
 
     def _lip_cut(self):
@@ -377,49 +423,43 @@ class GridfinityBin:
         )
 
     def _pocket_cut(self, p):
-        depth = p["depth"] if p["depth"] is not None else self.max_depth
-        z0 = self.total_h - depth
-        wp = cq.Workplane("XY").workplane(offset=z0)
-        wire = _rounded_rect(wp, p["length"], p["width"], p["radii"],
-                             p["center"])
-        return wire.extrude(self.total_h - z0 + 1)
+        wp = cq.Workplane("XY").workplane(offset=self.total_h - p.depth)
+        return _rounded_rect(wp, p.length, p.width, p.radii,
+                             p.center).extrude(p.depth + 1)
 
     def _polygon_cut(self, p):
-        depth = p["depth"] if p["depth"] is not None else self.max_depth
-        z0 = self.total_h - depth
-        wp = (cq.Workplane("XY").workplane(offset=z0)
-              .polyline(p["points"]).close())
-        if p["clearance"] > 0:
-            wp = wp.offset2D(p["clearance"])
-        return wp.extrude(self.total_h - z0 + 1)
+        wp = (cq.Workplane("XY").workplane(offset=self.total_h - p.depth)
+              .polyline(p.points).close())
+        if p.clearance > 0:
+            wp = wp.offset2D(p.clearance)
+        return wp.extrude(p.depth + 1)
 
-    def _apply_compartments(self, solid):
+    def _compartment_solids(self):
+        """Cutters (cavities) and additions (scoops, label shelves)."""
         c = self._compartments
-        comp_w, comp_d = self._compartment_size()
-        interior_w = self.outer_w - 2 * c["wall_t"]
-        interior_d = self.outer_d - 2 * c["wall_t"]
-        pocket_r = max(0.5, self.corner_r - c["wall_t"])
+        comp_w, comp_d, interior_w, interior_d = self._compartment_size()
+        # Interior corner radius floors at 0.5mm: with dividers thicker
+        # than the body fillet the interior corners just get near-sharp,
+        # which is valid geometry (this is a choice, not a repair).
+        pocket_r = max(0.5, CORNER_R - c.wall_t)
 
-        for col in range(c["cols"]):
-            for row in range(c["rows"]):
-                cx = -interior_w / 2 + col * (comp_w + c["wall_t"]) + comp_w / 2
-                cy = -interior_d / 2 + row * (comp_d + c["wall_t"]) + comp_d / 2
+        cutters, adds = [], []
+        for col in range(c.cols):
+            for row in range(c.rows):
+                cx = -interior_w / 2 + col * (comp_w + c.wall_t) + comp_w / 2
+                cy = -interior_d / 2 + row * (comp_d + c.wall_t) + comp_d / 2
                 wp = cq.Workplane("XY").workplane(offset=self.floor_z)
-                cut = _rounded_rect(wp, comp_w, comp_d, (pocket_r,) * 4,
-                                    (cx, cy)).extrude(
-                    self.total_h - self.floor_z + 1)
-                solid = solid.cut(cut)
-                if c["scoop_r"] > 0:
-                    solid = solid.union(
-                        self._scoop(cx, cy - comp_d / 2, comp_w, c["scoop_r"]))
-
-        if c["label_tab"]:
-            for row in range(c["rows"]):
-                y_back = (-interior_d / 2 + row * (comp_d + c["wall_t"])
-                          + comp_d)
-                solid = solid.union(
-                    self._label_shelf(y_back, interior_w, c["label_d"]))
-        return solid
+                cutters.append(
+                    _rounded_rect(wp, comp_w, comp_d, (pocket_r,) * 4,
+                                  (cx, cy)).extrude(self.max_depth + 1))
+                if c.scoop_r > 0:
+                    adds.append(self._scoop(cx, cy - comp_d / 2, comp_w,
+                                            c.scoop_r))
+        if c.label_tab:
+            for row in range(c.rows):
+                y_back = -interior_d / 2 + row * (comp_d + c.wall_t) + comp_d
+                adds.append(self._label_shelf(y_back, interior_w, c.label_d))
+        return cutters, adds
 
     def _scoop(self, cx, y_front, span, r):
         """Concave quarter-round ramp along a compartment's front floor edge."""
@@ -446,10 +486,9 @@ class GridfinityBin:
         )
 
     def _notch_cut(self, n):
-        depth = n["depth"] if n["depth"] is not None else self.total_h / 2
-        w = n["width"]
-        z_bot = self.total_h - depth
-        length = (self.outer_w if n["side"] in ("+X", "-X")
+        w = n.width
+        z_bot = self.total_h - n.depth
+        length = (self.outer_w if n.side in ("+X", "-X")
                   else self.outer_d) / 2 + 1
         cutter = (
             cq.Workplane("YZ")
@@ -460,26 +499,30 @@ class GridfinityBin:
             .close()
             .extrude(length)
         )
-        angle = {"+X": 0, "+Y": 90, "-X": 180, "-Y": 270}[n["side"]]
+        angle = {"+X": 0, "+Y": 90, "-X": 180, "-Y": 270}[n.side]
         if angle:
             cutter = cutter.rotate((0, 0, 0), (0, 0, 1), angle)
         return cutter
 
-    def _cut_base_holes(self, solid):
+    def _base_hole_cutter(self):
         """Magnet bores and/or screw holes, 4 per cell on a 26mm square."""
         half = HOLE_SPACING / 2
         positions = [(cx + dx, cy + dy)
                      for cx, cy in self._cell_centers()
                      for dx in (-half, half) for dy in (-half, half)]
-        if self.magnets:
-            cutter = (cq.Workplane("XY").pushPoints(positions)
-                      .circle(MAGNET_D / 2).extrude(MAGNET_DEPTH))
-            solid = solid.cut(cutter)
-        if self.screws:
-            cutter = (cq.Workplane("XY").pushPoints(positions)
-                      .circle(SCREW_D / 2).extrude(SCREW_DEPTH))
-            solid = solid.cut(cutter)
-        return solid
+        cutters = []
+        for enabled, dia, depth in ((self.magnets, MAGNET_D, MAGNET_DEPTH),
+                                    (self.screws, SCREW_D, SCREW_DEPTH)):
+            if enabled:
+                cutters.append(cq.Workplane("XY").pushPoints(positions)
+                               .circle(dia / 2).extrude(depth))
+        # Magnet bores and screw holes overlap (concentric counterbore),
+        # so fuse them into one tool; a compound of overlapping solids
+        # would leave internal faces in the cut result.
+        cutter = cutters[0]
+        for extra in cutters[1:]:
+            cutter = cutter.union(extra)
+        return cutter
 
     def summary(self):
         """One-paragraph description of the built dimensions."""

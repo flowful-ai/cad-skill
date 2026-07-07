@@ -1,7 +1,9 @@
+import math
+
 import cadquery as cq
 import pytest
-import trimesh
 
+import mesh_io
 from gridfinity import (
     BASE_H,
     CLEARANCE,
@@ -16,7 +18,12 @@ def _mesh(workplane, tmp_path, name="part.stl"):
     stl = tmp_path / name
     cq.exporters.export(workplane, str(stl),
                         tolerance=0.01, angularTolerance=0.1)
-    return trimesh.load(str(stl))
+    return mesh_io.load_mesh(str(stl))
+
+
+def _volume(bin):
+    """B-rep volume, no tessellation round-trip."""
+    return bin.build().val().Volume()
 
 
 def _assert_footprint(mesh, grid_x, grid_y):
@@ -41,31 +48,30 @@ def test_minimal_bin_no_lip(tmp_path):
 def test_bin_with_lip_magnets_screws(tmp_path):
     """2x1, 3U with lip and base holes."""
     bin = GridfinityBin(2, 1, 3, stacking_lip=True, magnets=True, screws=True)
-    m = _mesh(bin.build(), tmp_path)
+    built = bin.build()
+    m = _mesh(built, tmp_path)
     assert m.is_watertight
     _assert_footprint(m, 2, 1)
     # The lip rim tapers to an edge slightly below the theoretical total.
     assert 3 * HEIGHT_UNIT + 4.0 < m.extents[2] <= bin.total_h + 0.01
     # Holes remove material vs the same bin without them.
-    plain = _mesh(GridfinityBin(2, 1, 3, stacking_lip=True).build(),
-                  tmp_path, "plain.stl")
-    assert m.volume < plain.volume
+    assert built.val().Volume() < _volume(GridfinityBin(2, 1, 3,
+                                                        stacking_lip=True))
 
 
 def test_compartments_scoop_label(tmp_path):
     bin = GridfinityBin(2, 2, 4).add_compartments(
         cols=3, rows=2, scoop_r=6.0, label_tab=True)
-    m = _mesh(bin.build(), tmp_path)
+    built = bin.build()
+    m = _mesh(built, tmp_path)
     assert m.is_watertight
     _assert_footprint(m, 2, 2)
     # Scoop and label add material vs plain compartments.
-    plain = _mesh(GridfinityBin(2, 2, 4).add_compartments(cols=3, rows=2)
-                  .build(), tmp_path, "plain.stl")
-    assert m.volume > plain.volume
+    assert built.val().Volume() > _volume(
+        GridfinityBin(2, 2, 4).add_compartments(cols=3, rows=2))
 
 
 def test_polygon_pocket_with_clearance(tmp_path):
-    import math
     hexagon = [(25 * math.cos(a), 25 * math.sin(a))
                for a in [i * math.pi / 3 for i in range(6)]]
     bin = GridfinityBin(2, 2, 4).add_polygon_pocket(
@@ -76,12 +82,11 @@ def test_polygon_pocket_with_clearance(tmp_path):
 
 
 def test_finger_notch_removes_material(tmp_path):
-    plain = _mesh(GridfinityBin(1, 1, 4).build(), tmp_path, "plain.stl")
-    notched = _mesh(
-        GridfinityBin(1, 1, 4).add_finger_notch("+Y", width=15.0).build(),
-        tmp_path, "notched.stl")
-    assert notched.is_watertight
-    assert notched.volume < plain.volume
+    notched_bin = GridfinityBin(1, 1, 4).add_finger_notch("+Y", width=15.0)
+    built = notched_bin.build()
+    m = _mesh(built, tmp_path, "notched.stl")
+    assert m.is_watertight
+    assert built.val().Volume() < _volume(GridfinityBin(1, 1, 4))
 
 
 # ------------------------------------------------------------
@@ -134,6 +139,12 @@ def test_too_many_compartments_raises():
     bin = GridfinityBin(1, 1, 3).add_compartments(cols=8, rows=1)
     with pytest.raises(GridfinityError, match="compartments"):
         bin.build()
+
+
+def test_compartments_only_once():
+    bin = GridfinityBin(2, 2, 3).add_compartments(cols=2, rows=2)
+    with pytest.raises(GridfinityError, match="once"):
+        bin.add_compartments(cols=3, rows=1)
 
 
 def test_screws_need_thick_floor():

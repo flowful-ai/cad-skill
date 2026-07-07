@@ -24,8 +24,8 @@ from gridfinity import GridfinityBin
 
 bin = GridfinityBin(grid_x=3, grid_y=2, height_units=3,
                     stacking_lip=True, magnets=True, screws=False)
-bin.add_pocket(length=88.6, width=72.6, depth=34.5,
-               corner_r=(12.0, 12.0, 1.0, 1.0))   # per-corner radii
+bin.add_pocket(length=88.6, width=72.6,
+               corner_r=(12.0, 1.0))   # (-X end, +X end) radii
 bin.add_polygon_pocket(points, depth, clearance=0.0)
 bin.add_compartments(cols=2, rows=1, scoop_r=8.0, label_tab=True)
 bin.add_finger_notch(side="+X", width=30.0, depth=15.0)
