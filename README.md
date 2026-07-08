@@ -53,6 +53,7 @@ pip install -r requirements.txt
 |------|---------|
 | `SKILL.md` | Skill definition and workflow instructions for Claude |
 | `gridfinity.py` | Tested Gridfinity bin generator (base profile, stacking lip, magnets, compartments, custom pockets). Vendored next to generated scripts. |
+| `outline_from_scan.py` | Extracts a pocket outline from a 3D scan of an object (align, scale, slice, union), ready for `add_polygon_pocket`. |
 | `preview.py` | Headless STL to 6-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
 | `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, and emits a JSON result so Claude can self-correct in a loop. |
 | `mesh_io.py` | STL loading with validation (no pyrender dependency). Used by the wrapper and converter. |

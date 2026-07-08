@@ -156,10 +156,27 @@ def _compound(parts):
 
 
 def _fused(parts):
-    """Fuse workplanes into one solid tool, resolving any overlaps."""
+    """Combine cutter workplanes into one safe boolean tool.
+
+    Disjoint cutters ride in a cheap Compound; if any two bounding
+    boxes intersect, everything is fused instead so the cut cannot
+    leave internal faces. clean=False: the tool is discarded after
+    the cut, the built solid gets its own clean().
+    """
     if len(parts) == 1:
         return parts[0]
-    return parts[0].union(_compound(parts[1:]))
+    solids = []
+    for p in parts:
+        solids.extend(p.vals() if isinstance(p, cq.Workplane) else [p])
+    boxes = [s.BoundingBox() for s in solids]
+    overlapping = any(
+        a.xmin <= b.xmax and b.xmin <= a.xmax and
+        a.ymin <= b.ymax and b.ymin <= a.ymax and
+        a.zmin <= b.zmax and b.zmin <= a.zmax
+        for i, a in enumerate(boxes) for b in boxes[i + 1:])
+    if not overlapping:
+        return cq.Compound.makeCompound(solids)
+    return parts[0].union(_compound(parts[1:]), clean=False)
 
 
 class GridfinityBin:
@@ -300,14 +317,9 @@ class GridfinityBin:
 
         for p in self._pockets:
             self._check_depth(p.depth, "pocket")
-            cx, cy = p.center
-            if (abs(cx) + p.length / 2 > self.outer_w / 2 - MIN_WALL or
-                    abs(cy) + p.width / 2 > self.outer_d / 2 - MIN_WALL):
-                raise GridfinityError(
-                    f"pocket {p.length}x{p.width}mm at {p.center} "
-                    f"leaves less than {MIN_WALL}mm of outer wall "
-                    f"(interior is {self.outer_w - 2 * MIN_WALL:.1f}x"
-                    f"{self.outer_d - 2 * MIN_WALL:.1f}mm)")
+            self._check_wall_clearance(
+                p.length / 2, p.width / 2, p.center,
+                f"pocket {p.length}x{p.width}mm at {p.center}")
             ra, rb, rc, rd = p.radii
             if (ra + rb > p.length or rc + rd > p.length or
                     rb + rc > p.width or ra + rd > p.width):
@@ -319,21 +331,16 @@ class GridfinityBin:
             self._check_depth(p.depth, "polygon pocket")
             xs = [pt[0] for pt in p.points]
             ys = [pt[1] for pt in p.points]
-            if (max(map(abs, xs)) + p.clearance > self.outer_w / 2 - MIN_WALL
-                    or max(map(abs, ys)) + p.clearance
-                    > self.outer_d / 2 - MIN_WALL):
-                raise GridfinityError(
-                    "polygon pocket (plus clearance) leaves less than "
-                    f"{MIN_WALL}mm of outer wall")
+            self._check_wall_clearance(
+                max(map(abs, xs)) + p.clearance,
+                max(map(abs, ys)) + p.clearance, (0, 0),
+                "polygon pocket (plus clearance)")
 
         for p in self._cylinder_pockets:
             self._check_depth(p.depth, "cylinder pocket")
-            cx, cy = p.center
-            if (abs(cx) + p.diameter / 2 > self.outer_w / 2 - MIN_WALL or
-                    abs(cy) + p.diameter / 2 > self.outer_d / 2 - MIN_WALL):
-                raise GridfinityError(
-                    f"cylinder pocket d={p.diameter}mm at {p.center} leaves "
-                    f"less than {MIN_WALL}mm of outer wall")
+            self._check_wall_clearance(
+                p.diameter / 2, p.diameter / 2, p.center,
+                f"cylinder pocket d={p.diameter}mm at {p.center}")
 
         c = self._compartments
         if c:
@@ -364,6 +371,16 @@ class GridfinityBin:
                 raise GridfinityError(
                     f"notch offset {n.offset}mm pushes it past the wall "
                     f"(usable half-span {wall_half - CORNER_R:.1f}mm)")
+
+    def _check_wall_clearance(self, half_x, half_y, center, what):
+        """Feature footprint must leave MIN_WALL of outer wall."""
+        cx, cy = center
+        if (abs(cx) + half_x > self.outer_w / 2 - MIN_WALL or
+                abs(cy) + half_y > self.outer_d / 2 - MIN_WALL):
+            raise GridfinityError(
+                f"{what} leaves less than {MIN_WALL}mm of outer wall "
+                f"(interior is {self.outer_w - 2 * MIN_WALL:.1f}x"
+                f"{self.outer_d - 2 * MIN_WALL:.1f}mm)")
 
     def _check_depth(self, depth, what):
         if depth > self.max_depth + _EPS:
@@ -484,7 +501,7 @@ class GridfinityBin:
     def _cylinder_cut(self, p):
         return (cq.Workplane("XY")
                 .workplane(offset=self.total_h - p.depth)
-                .pushPoints([p.center])
+                .center(*p.center)
                 .circle(p.diameter / 2)
                 .extrude(p.depth + 1))
 
@@ -575,13 +592,9 @@ class GridfinityBin:
             if enabled:
                 cutters.append(cq.Workplane("XY").pushPoints(positions)
                                .circle(dia / 2).extrude(depth))
-        # Magnet bores and screw holes overlap (concentric counterbore),
-        # so fuse them into one tool; a compound of overlapping solids
-        # would leave internal faces in the cut result.
-        cutter = cutters[0]
-        for extra in cutters[1:]:
-            cutter = cutter.union(extra)
-        return cutter
+        # Magnet bores and screw holes are concentric counterbores;
+        # _fused detects the overlap and fuses them into one tool.
+        return _fused(cutters)
 
     def summary(self):
         """One-paragraph description of the built dimensions."""

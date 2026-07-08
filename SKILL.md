@@ -355,7 +355,8 @@ bin = GridfinityBin(grid_x=3, grid_y=2, height_units=3,
 bin.add_pocket(length=88.6, width=72.6, corner_r=(12.0, 1.0))  # cradle
 # or: bin.add_compartments(cols=3, rows=2, scoop_r=6, label_tab=True)
 # or: bin.add_polygon_pocket(points, depth=15, clearance=0.3)
-# or: bin.add_finger_notch(side="+Y", width=20)
+# or: bin.add_cylinder_pocket(diameter=22, center=(42, 27))  # finger well; overlapping pockets merge
+# or: bin.add_finger_notch(side="+Y", width=20, offset=40)   # offset slides it along the wall
 result = bin.build()
 cq.exporters.export(result, "my_bin.stl", tolerance=0.01, angularTolerance=0.1)
 print(bin.summary())
@@ -364,6 +365,7 @@ print(bin.summary())
 **Cheat sheet:**
 - Spec constants: grid pitch 42mm, height unit 7mm. Every derived number (footprint, lip height, floor Z, usable cavity depth) is exposed on the builder: `bin.outer_w`, `bin.outer_d`, `bin.total_h`, `bin.floor_z`, `bin.max_depth`, and `bin.summary()` prints them all. Read those instead of recomputing.
 - Sizing an object pocket: add 0.3mm per side fit clearance, plus ~1mm per side if the object must drop in and out easily.
+- Pocket matching a real object's shape: `outline_from_scan.py` extracts the max cross-section outline from an STL scan of the object (align, scale to spec dims, slice, union), ready for `add_polygon_pocket`.
 - Height choice: whatever holds the contents; the contents may protrude above the rim (see `examples/gridfinity_d110_bin.py`).
 - `magnets=True` needs a magnetic baseplate; skip it for drawer bins.
 
