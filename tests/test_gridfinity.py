@@ -76,8 +76,10 @@ def test_polygon_pocket_with_clearance_and_cylinder_well(tmp_path):
                for a in [i * math.pi / 3 for i in range(6)]]
     bin = GridfinityBin(2, 2, 4).add_polygon_pocket(
         hexagon, depth=15.0, clearance=0.3)
-    # Overlapping cylinder well merges with the polygon cavity.
-    bin.add_cylinder_pocket(diameter=14.0, center=(25.0, 0.0))
+    # Overlapping tilted scoop merges with the polygon cavity.
+    bin.add_cylinder_pocket(diameter=14.0, center=(25.0, 0.0),
+                            tilt=35.0, tilt_dir=(-1.0, 0.0),
+                            round_bottom=True)
     m = _mesh(bin.build(), tmp_path)
     assert m.is_watertight
     _assert_footprint(m, 2, 2)
@@ -87,6 +89,15 @@ def test_oversized_cylinder_pocket_raises():
     bin = GridfinityBin(1, 1, 3).add_cylinder_pocket(diameter=41.0)
     with pytest.raises(GridfinityError, match="cylinder"):
         bin.build()
+
+
+def test_cylinder_pocket_tilt_limits():
+    bin = GridfinityBin(2, 2, 4).add_cylinder_pocket(
+        diameter=14.0, tilt=60.0, tilt_dir=(1.0, 0.0))
+    with pytest.raises(GridfinityError, match="tilt"):
+        bin.build()
+    with pytest.raises(GridfinityError, match="tilt_dir"):
+        GridfinityBin(2, 2, 4).add_cylinder_pocket(diameter=14.0, tilt=30.0)
 
 
 def test_finger_notch_removes_material(tmp_path):

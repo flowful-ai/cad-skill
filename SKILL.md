@@ -355,7 +355,8 @@ bin = GridfinityBin(grid_x=3, grid_y=2, height_units=3,
 bin.add_pocket(length=88.6, width=72.6, corner_r=(12.0, 1.0))  # cradle
 # or: bin.add_compartments(cols=3, rows=2, scoop_r=6, label_tab=True)
 # or: bin.add_polygon_pocket(points, depth=15, clearance=0.3)
-# or: bin.add_cylinder_pocket(diameter=22, center=(42, 27))  # finger well; overlapping pockets merge
+# or: bin.add_cylinder_pocket(diameter=22, center=(42, 27),  # finger well; overlapping pockets merge
+#         tilt=35, tilt_dir=(-1, 0), round_bottom=True)      # smooth angled thumb scoop
 # or: bin.add_finger_notch(side="+Y", width=20, offset=40)   # offset slides it along the wall
 result = bin.build()
 cq.exporters.export(result, "my_bin.stl", tolerance=0.01, angularTolerance=0.1)

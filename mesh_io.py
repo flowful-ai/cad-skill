@@ -26,4 +26,10 @@ def load_mesh(path):
         raise ValueError("STL file contains no triangles")
     if not np.isfinite(tm.vertices).all():
         raise ValueError("STL file has non-finite vertex coordinates (NaN or inf)")
+    # OCC's tessellator emits zero-area triangles at the poles of
+    # spherical faces (and similar degenerate spots). They carry no
+    # surface, but their zero-length open edges make an otherwise
+    # closed mesh read as non-watertight. Drop them before any checks.
+    tm.update_faces(tm.nondegenerate_faces())
+    tm.merge_vertices()
     return tm

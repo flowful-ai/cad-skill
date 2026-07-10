@@ -26,6 +26,7 @@ Geometry conventions:
   height; the lip cut opens everything above it.
 """
 
+import math
 from typing import NamedTuple
 
 import cadquery as cq
@@ -90,6 +91,9 @@ class _CylinderPocket(NamedTuple):
     diameter: float
     depth: float
     center: tuple
+    tilt: float
+    tilt_dir: tuple
+    round_bottom: bool
 
 
 class _Notch(NamedTuple):
@@ -257,15 +261,31 @@ class GridfinityBin:
             clearance))
         return self
 
-    def add_cylinder_pocket(self, diameter, depth=None, center=(0.0, 0.0)):
+    def add_cylinder_pocket(self, diameter, depth=None, center=(0.0, 0.0),
+                            tilt=0.0, tilt_dir=None, round_bottom=False):
         """Round cavity cut from the top rim down `depth` mm.
 
         Useful for finger wells next to an object pocket, batteries,
         coins, dowels. Overlapping another pocket merges the cavities.
-        `depth=None` reaches the floor.
+        `depth=None` reaches the floor. `center` is the opening center
+        at the rim.
+
+        For a smooth thumb scoop instead of a straight hole: set
+        `round_bottom=True` (hemispherical bottom) and lean the bore
+        with `tilt` (degrees from vertical, max 45 so it prints without
+        supports) toward `tilt_dir`, an (dx, dy) direction the bottom
+        tip shifts along, e.g. toward the object pocket.
         """
+        if tilt and tilt_dir is None:
+            raise GridfinityError("tilt_dir is required when tilt is set")
+        if tilt_dir is not None:
+            norm = math.hypot(*tilt_dir)
+            if norm == 0:
+                raise GridfinityError("tilt_dir must be a non-zero (dx, dy)")
+            tilt_dir = (tilt_dir[0] / norm, tilt_dir[1] / norm)
         self._cylinder_pockets.append(_CylinderPocket(
-            diameter, self.max_depth if depth is None else depth, center))
+            diameter, self.max_depth if depth is None else depth, center,
+            tilt, tilt_dir, round_bottom))
         return self
 
     def add_compartments(self, cols=1, rows=1, wall_t=MIN_WALL,
@@ -341,6 +361,22 @@ class GridfinityBin:
             self._check_wall_clearance(
                 p.diameter / 2, p.diameter / 2, p.center,
                 f"cylinder pocket d={p.diameter}mm at {p.center}")
+            if not 0 <= p.tilt <= 45:
+                raise GridfinityError(
+                    "cylinder pocket tilt must be 0..45 degrees "
+                    "(above 45 the bore ceiling needs supports)")
+            if p.round_bottom and p.depth < p.diameter / 2:
+                raise GridfinityError(
+                    "round_bottom needs depth >= diameter/2")
+            if p.tilt:
+                shift = self._cylinder_drop(p) * math.tan(
+                    math.radians(p.tilt))
+                bottom = (p.center[0] + shift * p.tilt_dir[0],
+                          p.center[1] + shift * p.tilt_dir[1])
+                self._check_wall_clearance(
+                    p.diameter / 2, p.diameter / 2, bottom,
+                    f"tilted cylinder pocket bottom at "
+                    f"({bottom[0]:.1f}, {bottom[1]:.1f})")
 
         c = self._compartments
         if c:
@@ -498,12 +534,37 @@ class GridfinityBin:
             wp = wp.offset2D(p.clearance)
         return wp.extrude(p.depth + 1)
 
+    def _cylinder_drop(self, p):
+        """Vertical span of the bore's cylindrical part."""
+        return p.depth - (p.diameter / 2 if p.round_bottom else 0)
+
     def _cylinder_cut(self, p):
-        return (cq.Workplane("XY")
-                .workplane(offset=self.total_h - p.depth)
-                .center(*p.center)
-                .circle(p.diameter / 2)
-                .extrude(p.depth + 1))
+        r = p.diameter / 2
+        t = math.radians(p.tilt)
+        axis_len = self._cylinder_drop(p) / math.cos(t)
+        top_extra = 5.0  # reach above the rim so the cut clears the chamfer
+        if p.round_bottom:
+            # Single revolved capsule: a cylinder unioned with a tangent
+            # sphere leaves a degenerate seam that breaks watertightness.
+            k = r * math.sin(math.radians(45))
+            cutter = (
+                cq.Workplane("XZ")
+                .moveTo(0, top_extra)
+                .lineTo(r, top_extra)
+                .lineTo(r, -axis_len)
+                .threePointArc((k, -axis_len - k), (0, -axis_len - r))
+                .close()
+                .revolve(360, (0, 0), (0, 1))
+            )
+        else:
+            cutter = (cq.Workplane("XY", origin=(0, 0, top_extra))
+                      .circle(r).extrude(-(axis_len + top_extra)))
+        if p.tilt:
+            # Rotate about the opening center; axis (dy, -dx) swings the
+            # bottom tip toward tilt_dir.
+            dx, dy = p.tilt_dir
+            cutter = cutter.rotate((0, 0, 0), (dy, -dx, 0), p.tilt)
+        return cutter.translate((p.center[0], p.center[1], self.total_h))
 
     def _compartment_solids(self):
         """Cutters (cavities) and additions (scoops, label shelves)."""
