@@ -18,6 +18,12 @@ Published on [MakerWorld](https://makerworld.com/en/@sercanto).
 </p>
 
 <p align="center">
+  <img src="docs/mx_master3_bin_3x3_preview.png" alt="Gridfinity 3x3 bin for Logitech MX Master 3, pocket traced from a 3D scan" width="640">
+</p>
+
+The MX Master 3 bin above ([examples/mx_master3_bin_3x3.py](examples/mx_master3_bin_3x3.py)) shows the scan-to-pocket pipeline: `outline_from_scan.py` traces the mouse's real footprint from a 3D scan, the outline is rotated to the angle that minimizes its bounding square so the bin fits a 3x3 grid instead of 4x3, and a tilted thumb scoop ramps under the thumb rest to lift the mouse out.
+
+<p align="center">
   <img src="docs/magnet_catch_preview.png" alt="Magnetic door catch (frame side)" width="640">
   <img src="docs/magnet_strike_preview.png" alt="Magnetic door catch (door side)" width="640">
 </p>
@@ -54,6 +60,7 @@ pip install -r requirements.txt
 | `SKILL.md` | Skill definition and workflow instructions for Claude |
 | `gridfinity.py` | Tested Gridfinity bin generator (base profile, stacking lip, magnets, compartments, custom pockets). Vendored next to generated scripts. |
 | `outline_from_scan.py` | Extracts a pocket outline from a 3D scan of an object (align, scale, slice, union), ready for `add_polygon_pocket`. |
+| `examples/` | Model scripts built on the gridfinity module (D110 cradle, MX Master 3 diagonal bin). |
 | `preview.py` | Headless STL to 6-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
 | `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, and emits a JSON result so Claude can self-correct in a loop. |
 | `mesh_io.py` | STL loading with validation (no pyrender dependency). Used by the wrapper and converter. |
