@@ -21,7 +21,7 @@ Published on [MakerWorld](https://makerworld.com/en/@sercanto).
   <img src="docs/mx_master3_bin_3x3_preview.png" alt="Gridfinity 3x3 bin for Logitech MX Master 3, pocket traced from a 3D scan" width="640">
 </p>
 
-The MX Master 3 bin above ([examples/mx_master3_bin_3x3.py](examples/mx_master3_bin_3x3.py)) shows the scan-to-pocket pipeline: `outline_from_scan.py` traces the mouse's real footprint from a 3D scan, the outline is rotated to the angle that minimizes its bounding square so the bin fits a 3x3 grid instead of 4x3, and a tilted thumb scoop ramps under the thumb rest to lift the mouse out.
+The MX Master 3 bin above ([examples/mx_master3_bin_3x3.py](examples/mx_master3_bin_3x3.py), [printed and published on MakerWorld](https://makerworld.com/en/models/3049470-gridfinity-bin-for-logitech-mx-master-3-3x3)) shows the scan-to-pocket pipeline: `outline_from_scan.py` traces the mouse's real footprint from a 3D scan, the outline is rotated to the angle that minimizes its bounding square so the bin fits a 3x3 grid instead of 4x3, and a tilted thumb scoop ramps under the thumb rest to lift the mouse out.
 
 <p align="center">
   <img src="docs/magnet_catch_preview.png" alt="Magnetic door catch (frame side)" width="640">
