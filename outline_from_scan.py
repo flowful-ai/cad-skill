@@ -6,8 +6,8 @@ region a Gridfinity pocket wraps), as a point list ready to paste into
 (long axis to X), drop it to Z=0, optionally scale anisotropically to
 known real dims, slice every millimeter, union the sections, simplify.
 
-Example (MX Master 4 cradle from robomo's MX Master 3 scan):
-    python3 outline_from_scan.py scan.stl --dims 128.2x88.4x50.8 \
+Example (MX Master 3 cradle from robomo's scan of the mouse):
+    python3 outline_from_scan.py scan.stl --dims 124.9x84.3x51 \
         --zmax 19 --out outline.json
 
 With --rotate-min-square the outline is rotated to the angle that

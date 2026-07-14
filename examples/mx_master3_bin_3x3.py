@@ -13,9 +13,8 @@ drawer bin. The rotation is computed below from the base outline, so
 a regenerated outline only needs pasting once.
 
 Fit note (print-verified): the outline is the MX Master 3 scan scaled
-up to the MX Master 4 spec dims, so an MX Master 3 sits in it with
-~3mm of easy slack per side. The real MX Master 4 does NOT fit; its
-footprint changed shape, not just size.
+up a few percent (to 128.2x88.4mm), so an MX Master 3 / 3S sits in it
+with ~3mm of easy slack per side.
 
 Outline provenance: "Logitech Mx Master 3 3D Scan" by robomo
 (printables.com/model/1149616), processed with:
