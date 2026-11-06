@@ -28,7 +28,7 @@ import trimesh
 import pyrender
 from PIL import Image, ImageDraw, ImageFont
 
-from mesh_io import load_mesh  # re-exported: preview's public surface for mesh loading
+from mesh_io import estimate_mass, load_mesh  # load_mesh re-exported: preview's public surface for mesh loading
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +311,11 @@ def _get_font(size=14):
     return ImageFont.load_default()
 
 
+def title_from_path(path):
+    """"cat_flap_cover.stl" -> "Cat Flap Cover"."""
+    return os.path.splitext(os.path.basename(path))[0].replace("_", " ").title()
+
+
 def _info_lines(tm):
     """Two-line footer with dimensions, volume, triangle count, and status."""
     extents = tm.bounding_box.extents
@@ -324,9 +329,7 @@ def _info_lines(tm):
     line2 = f"Triangles: {len(tm.faces):,}"
     line2 += f"  |  {'Watertight' if tm.is_watertight else 'NOT watertight'}"
     try:
-        vol = abs(tm.volume)
-        weight_g = vol / 1000 * 1.24  # PLA density ~1.24 g/cm3
-        line2 += f"  |  PLA estimate: ~{weight_g:.0f} g"
+        line2 += f"  |  PLA ~{estimate_mass(tm):.0f} g (2 walls, 15% infill)"
     except Exception:
         pass
     return line1, line2
@@ -450,7 +453,7 @@ def main():
         args.output = f"{base}_preview.png"
 
     if args.title is None:
-        args.title = os.path.splitext(os.path.basename(args.stl_file))[0].replace("_", " ").title()
+        args.title = title_from_path(args.stl_file)
 
     try:
         tm = load_mesh(args.stl_file)

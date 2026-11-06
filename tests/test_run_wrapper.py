@@ -56,7 +56,7 @@ def test_json_shape_keys(good_script):
     expected = {
         "success", "script", "stls", "stl", "previews", "preview",
         "threemfs", "threemf", "steps", "step", "watertight",
-        "stdout", "stderr", "returncode",
+        "bboxes", "fits_bed", "stdout", "stderr", "returncode",
     }
     assert expected.issubset(data.keys())
 
@@ -77,3 +77,35 @@ def test_preview_renders_png(good_script):
     assert len(data["previews"]) == 1
     assert os.path.exists(data["previews"][0])
     assert data["preview"].endswith("_preview.png")
+
+
+def test_bed_fits(good_script):
+    rc, data = run(good_script, "--bed", "a1")
+    assert rc == 0
+    assert data["fits_bed"] is True
+    assert data["bboxes"] == [[10.0, 10.0, 10.0]]
+
+
+def test_bed_too_small_fails(good_script):
+    rc, data = run(good_script, "--bed", "15x15x15")
+    assert rc == 1
+    assert data["success"] is False
+    assert data["fits_bed"] is False
+    assert "Does not fit the bed" in data["stderr"]
+    # The misfit is still measured.
+    assert data["bboxes"] == [[10.0, 10.0, 10.0]]
+
+
+def test_bed_without_stl_fails(empty_script):
+    rc, data = run(empty_script, "--bed", "a1")
+    assert rc == 1
+    assert "No STL files produced" in data["stderr"]
+
+
+def test_bed_unknown_printer_is_usage_error(good_script):
+    result = subprocess.run(
+        [sys.executable, WRAPPER, str(good_script), "--bed", "nope"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+    assert "a1mini" in result.stderr
