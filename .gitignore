@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.stl
 *.3mf
+*.step
 *_preview.png
 !docs/*
 press/
