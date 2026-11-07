@@ -51,7 +51,18 @@ PRINTER_BEDS = {
     "mini": (180, 180, 180),        # Prusa MINI+
     "core1": (250, 220, 270),       # Prusa CORE One
     "ender3": (220, 220, 250),      # Creality Ender-3 / Ender-3 V2
+    "ender3s1": (220, 220, 270),    # Creality Ender-3 S1
     "k1": (220, 220, 250),          # Creality K1
+}
+
+# Other spellings users give, after lowercasing and dropping spaces,
+# dashes, underscores and "+".
+PRINTER_ALIASES = {
+    "bambua1": "a1", "bambua1mini": "a1mini", "a1m": "a1mini",
+    "p1": "p1s", "x1": "x1c", "x1carbon": "x1c", "x1e": "x1c",
+    "prusamk4": "mk4", "prusamini": "mini",
+    "coreone": "core1", "prusacoreone": "core1",
+    "ender3v2": "ender3", "ender3pro": "ender3",
 }
 
 
@@ -61,7 +72,8 @@ def parse_bed(spec):
     Raises ValueError with the list of known printers on a bad spec.
     """
     raw = spec.strip().lower().replace(" ", "")
-    name = raw.replace("-", "").replace("_", "")
+    name = raw.replace("-", "").replace("_", "").replace("+", "")
+    name = PRINTER_ALIASES.get(name, name)
     if name in PRINTER_BEDS:
         return PRINTER_BEDS[name]
     try:

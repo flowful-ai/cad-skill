@@ -7,13 +7,22 @@ next segment drops into. Every segment screws to the desk underside on
 its own, so the joint only has to align, not carry load.
 
 Print: upright (open side up), no supports. Screw tabs sit on 45 degree
-gussets. PETG or PLA, 0.2mm layers, 3 walls.
+gussets; the screw bore ends in a 90 degree countersink cone, so nothing
+bridges flat and countersunk wood screws seat on it. PETG or PLA, 0.2mm
+layers, 3 walls.
     python3 run_cadquery_model.py examples/desk_cable_tray.py --preview --strict --bed a1
 """
 
 import math
+import sys
+from pathlib import Path
 
 import cadquery as cq
+
+# In your own project, copy mating.py next to your script instead
+# of this path shim (it only resolves the module inside this repo).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from mating import check_mating
 
 # ============================================================
 # PARAMETERS
@@ -35,7 +44,7 @@ cheek_t = 2.4          # mm
 tab_w = 16.0           # mm - along the tray
 tab_reach = 14.0       # mm - out from the wall
 tab_t = 4.0            # mm
-screw_d = 4.5          # mm - clearance for a 4 mm wood screw
+screw_d = 4.5          # mm - clearance for a 4 mm countersunk wood screw
 head_d = 9.0           # mm - screw head + driver, bored up through the gusset
 tabs_per_side = 2
 
@@ -98,25 +107,27 @@ for side in (-1, 1):
         hole_xy = (x, y_wall + side * tab_reach / 2)
         hole = cq.Workplane("XY", origin=(*hole_xy, 0)).circle(
             screw_d / 2).extrude(outer_h + 1)
+        # Bore up to a 45 degree cone that narrows to the screw hole and
+        # meets the tab underside: no flat ceiling to bridge.
+        cone_h = (head_d - screw_d) / 2
+        bore_top = outer_h - tab_t - cone_h
         head_bore = cq.Workplane("XY", origin=(*hole_xy, -1)).circle(
-            head_d / 2).extrude(outer_h - tab_t + 1)
-        body = body.union(tab).union(gusset).cut(hole).cut(head_bore)
+            head_d / 2).extrude(bore_top + 1)
+        cone = cq.Workplane("XY").add(cq.Solid.makeCone(
+            head_d / 2, screw_d / 2, cone_h,
+            pnt=cq.Vector(*hole_xy, bore_top), dir=cq.Vector(0, 0, 1)))
+        body = (body.union(tab).union(gusset)
+                .cut(hole).cut(head_bore).cut(cone))
 
 result = body
 
 # ============================================================
 # FIT CHECK  (two segments in assembled position, not exported)
 # ============================================================
-def overlap(a, b):
-    return a.intersect(b).val().Volume()
-
-next_seg = body.translate((seg_len, 0, 0))
-nominal = overlap(body, next_seg)
-assert nominal < 1e-3, f"segments collide when assembled ({nominal:.2f} mm3)"
-# The socket must actually capture the next segment: a sideways shift
-# just past the clearance has to hit a cheek.
-shifted = overlap(body, next_seg.translate((0, joint_clearance + 0.1, 0)))
-assert shifted > 1.0, "socket does not capture the next segment"
+# The socket locates sideways (Y). Z is left out on purpose: the screws
+# hold each segment against the desk, and X is the slide-in direction.
+check_mating(body, body.translate((seg_len, 0, 0)),
+             clearance=joint_clearance, axes=("y",))
 
 # ============================================================
 # EXPORT

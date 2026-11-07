@@ -71,6 +71,7 @@ pip install -r requirements.txt
 |------|---------|
 | `SKILL.md` | Skill definition and workflow instructions for Claude |
 | `gridfinity.py` | Tested Gridfinity bin generator (base profile, stacking lip, magnets, compartments, custom pockets). Vendored next to generated scripts. |
+| `mating.py` | Fit check for parts that go together: no collision when assembled, and the joint locates instead of rattling. Vendored next to generated scripts. |
 | `outline_from_scan.py` | Extracts a pocket outline from a 3D scan of an object (align, scale, slice, union), ready for `add_polygon_pocket`. |
 | `examples/` | Example model scripts: Gridfinity bins (D110 cradle, MX Master 3 diagonal bin), cat flap cover plate, segmented desk cable tray. |
 | `preview.py` | Headless STL to 6-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |

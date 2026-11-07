@@ -356,17 +356,18 @@ cq.exporters.export(lid, "enclosure_lid.stl")
 
 Name files descriptively so the user knows which part is which.
 
-**Check how the parts mate before printing them.** A preview shows each part alone, so it can't catch a lid that collides with its box or a joint too loose to hold. Place the parts in their assembled position inside the script (don't export that) and assert on the intersection volume:
+**Check how the parts mate before printing them.** A preview shows each part alone, so it can't catch a lid that collides with its box or a joint too loose to hold. Copy the bundled `mating.py` next to the script, place the parts in their assembled position (don't export that) and call `check_mating`:
 
 ```python
-def overlap(a, b):
-    return a.intersect(b).val().Volume()
+from mating import check_mating
 
-lid_on = lid.translate((0, 0, box_h))          # assembled position
-assert overlap(box, lid_on) < 1e-3, "lid collides with box"
-# A joint must also capture: a shift just past the clearance has to collide.
-assert overlap(box, lid_on.translate((fit_clearance + 0.1, 0, 0))) > 1.0, "lid would rattle"
+# Raises MatingError if the lid collides with the box, or if a shift of
+# clearance + 0.1mm along X or Y doesn't hit anything (the lid rattles).
+check_mating(box, lid.translate((0, 0, box_h)), clearance=fit_clearance,
+             axes=("x", "y"))
 ```
+
+List only the axes the joint itself must hold. Leave out an axis that screws, glue or gravity take care of.
 
 ### Parts larger than the bed
 

@@ -109,3 +109,28 @@ def test_bed_unknown_printer_is_usage_error(good_script):
     )
     assert result.returncode == 2
     assert "a1mini" in result.stderr
+
+
+def test_bed_empty_string_is_usage_error(good_script):
+    result = subprocess.run(
+        [sys.executable, WRAPPER, str(good_script), "--bed", ""],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+
+
+def test_strict_and_bed_report_both_problems(tmp_path):
+    """A non-watertight part that is also too big gets both errors in one run."""
+    script = tmp_path / "open_big.py"
+    script.write_text(
+        "import trimesh\n"
+        "m = trimesh.creation.box((300, 10, 10))\n"
+        "m.update_faces([i for i in range(len(m.faces)) if i != 0])\n"
+        "m.export('open_big.stl')\n"
+    )
+    rc, data = run(script, "--strict", "--bed", "a1")
+    assert rc == 1
+    assert data["watertight"] is False
+    assert data["fits_bed"] is False
+    assert "not watertight" in data["stderr"]
+    assert "Does not fit the bed" in data["stderr"]

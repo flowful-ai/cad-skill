@@ -32,7 +32,11 @@ def test_parse_bed_forms():
     assert mesh_io.parse_bed("a1-mini") == (180, 180, 180)
     assert mesh_io.parse_bed("250x210x220") == (250.0, 210.0, 220.0)
     assert mesh_io.parse_bed("200") == (200.0, 200.0, 200.0)
-    for bad in ("10x10", "250x-210x220", "inf", "nan", "0"):
+    assert mesh_io.parse_bed("Ender-3 V2") == (220, 220, 250)
+    assert mesh_io.parse_bed("X1 Carbon") == (256, 256, 256)
+    assert mesh_io.parse_bed("MINI+") == (180, 180, 180)
+    assert mesh_io.parse_bed("Ender-3 S1") == (220, 220, 270)
+    for bad in ("", "10x10", "250x-210x220", "inf", "nan", "0"):
         with pytest.raises(ValueError, match="printer name"):
             mesh_io.parse_bed(bad)
 

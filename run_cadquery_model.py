@@ -105,22 +105,28 @@ def _process_stls(stls, views, strict, want_preview, bed=None):
     part is its own print, so they are checked one by one; a misfit still
     gets its preview, and every misfit is listed in the error.
 
+    A failure on one STL does not stop the others: every STL is loaded,
+    measured and bed-checked, so one run reports every problem at once.
+
     Returns a dict with previews, watertights, bboxes (lists), fits_bed
-    (bool or None) and error (str or None). The caller surfaces the error
+    (bool or None, None when a part could not be measured) and error
+    (str or None, all problems joined). The caller surfaces the error
     into result["stderr"].
     """
     import mesh_io  # trimesh + numpy only
 
     out = {"previews": [], "watertights": [], "bboxes": [],
            "fits_bed": None, "error": None}
-    misfits = []
+    errors, misfits = [], []
+    unmeasured = False
 
     for stl in stls:
         try:
             tm = mesh_io.load_mesh(stl)
         except ValueError as e:
-            out["error"] = f"Mesh load failed ({stl}): {e}"
-            return out
+            errors.append(f"Mesh load failed ({stl}): {e}")
+            unmeasured = True
+            continue
 
         watertight = bool(tm.is_watertight)
         out["watertights"].append(watertight)
@@ -133,8 +139,8 @@ def _process_stls(stls, views, strict, want_preview, bed=None):
                 misfits.append(f"{os.path.basename(stl)}: {msg}")
 
         if strict and not watertight:
-            out["error"] = f"Mesh {stl} is not watertight (--strict set)."
-            return out
+            errors.append(f"Mesh {stl} is not watertight (--strict set).")
+            continue  # no preview of a mesh --strict rejects
 
         if want_preview:
             import preview  # heavy: trimesh + pyrender, only here
@@ -146,18 +152,21 @@ def _process_stls(stls, views, strict, want_preview, bed=None):
                 else:
                     preview.render_single(tm, preview_path, title)
             except Exception as e:
-                out["error"] = f"Preview render failed ({stl}): {e}"
-                return out
+                errors.append(f"Preview render failed ({stl}): {e}")
+                continue
             out["previews"].append(preview_path)
 
     if bed is not None:
-        out["fits_bed"] = not misfits
         if misfits:
-            out["error"] = (
+            out["fits_bed"] = False
+            errors.append(
                 "Does not fit the bed: " + "; ".join(misfits) + ". Rotate "
                 "the geometry in the script, shrink it, or split it into "
                 "parts that join after printing."
             )
+        elif not unmeasured:
+            out["fits_bed"] = True
+    out["error"] = "\n".join(errors) or None
     return out
 
 
@@ -183,7 +192,7 @@ def main():
     args = parser.parse_args()
 
     bed = None
-    if args.bed:
+    if args.bed is not None:
         import mesh_io
         try:
             bed = mesh_io.parse_bed(args.bed)

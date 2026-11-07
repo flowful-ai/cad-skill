@@ -2,7 +2,8 @@
 
 Sticks on with VHB tape. A hollow locating plug drops into the door
 cut-out so the plate centres itself and the tape is not the only thing
-resisting a sideways knock. Print two to close both faces of the door.
+resisting a sideways knock. Print two to close both faces of the door
+(set door_t first: the two plugs must not meet inside the hole).
 
 Print: front face down on the bed (smooth/textured plate finish shows),
 plug pointing up, no supports. PLA or PETG, 0.2mm layers, brim against
@@ -21,9 +22,11 @@ frame_w = 192.0        # mm - old frame width, plate must hide its footprint
 frame_h = 200.0        # mm - old frame height
 cutout_w = 165.0       # mm - hole in the door, measure after removing the flap
 cutout_h = 174.0       # mm
+door_t = 40.0          # mm - door thickness, measure it (typical 35-45)
+plates = 2             # 1 = one face only, 2 = both faces of the door
 
 # Plate
-tape_band_min = 20.0   # mm - flat land left around the plug for VHB tape
+tape_band_min = 20.0   # mm - plate on solid door around the hole, for VHB tape
 margin = 8.0           # mm - overlap past the old frame footprint, per side
 plate_t = 3.0          # mm - plate thickness
 corner_r = 10.0        # mm - outer corner radius
@@ -31,7 +34,7 @@ front_chamfer = 1.2    # mm - chamfer on the visible front edge (bed side)
 
 # Locating plug (set plug_depth = 0 to drop it)
 plug_clearance = 1.5   # mm - per side, hand-cut holes are never exact
-plug_depth = 12.0      # mm - keep < half the door thickness if printing two
+plug_depth = 12.0      # mm - checked against door_t below
 plug_wall = 2.4        # mm - 6 perimeters at 0.4 nozzle
 plug_corner_r = 12.0   # mm - generous so it clears drilled hole corners
 
@@ -51,11 +54,17 @@ plug_h = cutout_h - 2 * plug_clearance
 inner_w = plug_w - 2 * plug_wall
 inner_h = plug_h - 2 * plug_wall
 
-tape_band = min(plate_w - plug_w, plate_h - plug_h) / 2
+# Tape only grips where the plate covers door, i.e. outside the cut-out
+# (the plug clearance hangs over the hole).
+tape_band = min(plate_w - cutout_w, plate_h - cutout_h) / 2
+plug_gap = 1.0         # mm - left between two plugs meeting inside the door
 assert cutout_w < frame_w and cutout_h < frame_h, "cut-out larger than frame"
 assert plug_depth == 0 or tape_band >= tape_band_min, (
-    f"only {tape_band:.1f} mm left for tape around the plug, raise margin")
+    f"only {tape_band:.1f} mm of door left for tape around the hole, raise margin")
 assert rib_h <= plug_depth or plug_depth == 0, "ribs taller than plug"
+assert plates * plug_depth + (plates - 1) * plug_gap <= door_t, (
+    f"{plates} plugs of {plug_depth} mm do not fit a {door_t} mm door, "
+    "reduce plug_depth")
 
 # ============================================================
 # MODEL  (Z=0 is the front face, on the bed)

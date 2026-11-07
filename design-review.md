@@ -120,7 +120,7 @@ assert abs(bb.xlen - expected_width) < 0.1, f"Width mismatch: {bb.xlen} vs {expe
 
 ### Mating Parts
 
-For lids, joints, segments or anything that fits into another printed part, check the fit in the script: build both parts, move one to its assembled position, and assert that `a.intersect(b).val().Volume()` is zero. Then shift it by the clearance plus 0.1mm and assert the volume is positive, which proves the joint actually locates. See "Multi-Part Models" in `SKILL.md`.
+For lids, joints, segments or anything that fits into another printed part, check the fit in the script with `mating.check_mating`: build both parts, move one to its assembled position, and it asserts they don't intersect there, then that a shift of the clearance plus 0.1mm along each listed axis does intersect, which proves the joint actually locates. See "Multi-Part Models" in `SKILL.md`.
 
 ### Watertight Check
 
