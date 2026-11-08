@@ -108,6 +108,10 @@ python3 preview.py model.stl preview.png --views multi
 
 Then view the preview image, self-review it against the checklist in `design-review.md`, and fix any issues you spot **before** showing it to the user.
 
+A preview shows the user the shape. It does not give them a way to *name* a
+part, so once the model has several similar features, pair it with a numbered
+callout drawing (see Numbered Callouts below) before asking for feedback.
+
 ---
 
 ### Phase 1: Base Shape
@@ -171,6 +175,67 @@ TPU-adjacent protective shell.
 ```
 
 Keep it to ~3 lines. Never dump every slicer setting; the slicer already knows.
+
+## Numbered Callouts (naming parts with the user)
+
+Once a model has more than a handful of features, prose stops working as a
+naming system. "The back wall", "the side nearest the keyboard", "the far
+rim" - the user means one face and you mean another, you both believe you
+agree, and a dozen messages later the wrong face has been edited twice.
+
+The fix is to number the features and let the user point:
+
+```bash
+python3 callout.py model.stl --out annotated.pdf --above 17.1 \
+    --callout "82,-55:Keyboard pocket - the ErgoDox half sits here" \
+    --callout "105,-8:Rear wire notch, for the TRRS and USB cables" \
+    --callout "84,-196:Wrist rest recess - the Wing drops in here"
+```
+
+That writes a vector PDF plus a PNG, and prints the numbered table so you can
+quote the same numbers in the same message as the drawing. The user replies
+"lower (7) by 4 mm" and there is nothing left to misread.
+
+**Reach for this when:**
+
+- the user has given a direction you are not certain you can resolve to one
+  face ("reduce the height of the back wing") - draw it and ask, rather than
+  guessing and burning a build
+- a part has two similar features, mirrored or opposed, that an adjective
+  cannot separate
+- you are about to describe geometry in a paragraph. A numbered figure is
+  shorter and cannot be read two ways
+- a model is being handed over, or picked back up after a gap
+
+**Two rules that decide whether the drawing settles an argument or starts one:**
+
+1. **Every outline is ray-cast from the mesh**, never drawn from the parameter
+   values. A figure built from the parameters shows what you believe you built;
+   a figure cast from the solid shows what you actually built, which is the
+   only version worth showing to someone. When the drawing and the part
+   disagree, the drawing is then wrong *and visibly so*.
+2. **Numbers in circles with a key, never text on leader lines.** Leaders
+   cross the drawing, collide with each other and cover the geometry they
+   point at. A circled number is a fixed few millimetres wherever it lands.
+
+`--above Z` shades material standing above `Z` in a darker grey, which is what
+separates a rim from the floor it stands on in a plan view. `--view` takes
+`top`, `bottom`, `front` or `right`; callout coordinates are always in the
+axes the drawing shows, so the user can read a position off the sheet and type
+it straight back.
+
+**Hand the user the PDF, not an inline image.** Inline rendering is unreliable
+in several clients, and a drawing nobody can open is worse than no drawing -
+you will go on reasoning from a figure the user has never seen. Give the
+absolute path.
+
+The script refuses to write a figure it cannot stand behind: a callout that
+falls outside the drawing is an error (the coordinates are in the wrong frame
+or the wrong view), a callout sitting on a gap rather than on material is a
+warning (right for an aperture or a notch, wrong for anything else), and a
+drawing whose render comes out blank is an error. That last one is not
+hypothetical - a section plane built with its normal the wrong way round cuts
+nothing and produces a clean, blank, entirely confident drawing.
 
 ## Script Template
 

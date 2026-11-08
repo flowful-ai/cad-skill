@@ -44,6 +44,27 @@ Once installed, the skill activates in two ways inside Claude Code:
 
 Claude will then walk you through requirements, build the model in phases (base shape, features, finish), and deliver an STL plus a rendered preview.
 
+### Agreeing on part names
+
+Prose stops working as a naming system once a model has several similar
+features: "the back wall" means one face to you and another to Claude, and the
+mistake only shows up after the wrong face has been edited. `callout.py`
+numbers the features instead, so you can say "lower (3) by 4 mm".
+
+```bash
+python3 callout.py model.stl --out annotated.pdf --above 6.75 \
+    --callout "0,0:Printer cavity - the D110 lies on its 34 mm side here" \
+    --callout "0,38:Stacking lip - mates with the bin above"
+```
+
+<p align="center">
+  <img src="docs/callout_example.png" alt="Numbered callout drawing of the D110 bin" width="640">
+</p>
+
+Every outline is ray-cast from the mesh rather than drawn from the parameter
+values, so the figure shows what was actually built. It writes a vector PDF
+alongside the PNG and prints the numbered table for quoting back.
+
 ## Dependencies
 
 Requires **Python 3.10-3.12** (CadQuery's OCC kernel does not have wheels for 3.13+):
@@ -61,6 +82,7 @@ pip install -r requirements.txt
 | `gridfinity.py` | Tested Gridfinity bin generator (base profile, stacking lip, magnets, compartments, custom pockets). Vendored next to generated scripts. |
 | `outline_from_scan.py` | Extracts a pocket outline from a 3D scan of an object (align, scale, slice, union), ready for `add_polygon_pocket`. |
 | `examples/` | Model scripts built on the gridfinity module (D110 cradle, MX Master 3 diagonal bin). |
+| `callout.py` | Numbered-callout drawing (PDF + PNG) with a key, ray-cast from the mesh, for agreeing on part names with the user. |
 | `preview.py` | Headless STL to 6-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
 | `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, and emits a JSON result so Claude can self-correct in a loop. |
 | `mesh_io.py` | STL loading with validation (no pyrender dependency). Used by the wrapper and converter. |
