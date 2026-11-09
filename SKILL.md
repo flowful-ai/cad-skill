@@ -11,12 +11,18 @@ This skill generates parametric 3D models using **CadQuery** (Python) and export
 
 ## Setup
 
-```bash
-# CadQuery requires Python 3.10-3.12 (OCC kernel lacks 3.13+ wheels)
-python3.12 -m venv .venv && source .venv/bin/activate
+CadQuery requires Python 3.10-3.12 (the OCC kernel lacks 3.13+ wheels). Run from this skill's directory. With [uv](https://docs.astral.sh/uv/), which downloads Python 3.12 if the machine lacks it:
 
-# Install CadQuery and preview dependencies
-pip install cadquery trimesh pyrender Pillow numpy lxml
+```bash
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+Without uv, when Python 3.10-3.12 is already installed:
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, Pillow, and numpy are used for the preview-analyze-iterate loop; lxml is required by the 3MF writer (`stl_to_3mf.py`). No display server is needed; everything renders headlessly via pyrender's offscreen backend.
