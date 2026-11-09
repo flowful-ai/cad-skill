@@ -118,6 +118,10 @@ assert abs(bb.xlen - expected_width) < 0.1, f"Width mismatch: {bb.xlen} vs {expe
 - Volume > 0 confirms the model is a valid solid
 - Compare volume with/without shell to verify wall thickness
 
+### Mating Parts
+
+For lids, joints, segments or anything that fits into another printed part, check the fit in the script with `mating.check_mating`: build both parts, move one to its assembled position, and it asserts they don't intersect there, then that a shift of the clearance plus 0.1mm along each listed axis does intersect, which proves the joint actually locates. See "Multi-Part Models" in `SKILL.md`.
+
 ### Watertight Check
 
 Non-watertight meshes are the most common cause of slicing failures. Always verify:

@@ -24,6 +24,18 @@ Published on [MakerWorld](https://makerworld.com/en/@sercanto).
 The MX Master 3 bin above ([examples/mx_master3_bin_3x3.py](examples/mx_master3_bin_3x3.py), [printed and published on MakerWorld](https://makerworld.com/en/models/3049470-gridfinity-bin-for-logitech-mx-master-3-3x3)) shows the scan-to-pocket pipeline: `outline_from_scan.py` traces the mouse's real footprint from a 3D scan, the outline is rotated to the angle that minimizes its bounding square so the bin fits a 3x3 grid instead of 4x3, and a tilted thumb scoop ramps under the thumb rest to lift the mouse out.
 
 <p align="center">
+  <img src="docs/cat_flap_cover_preview.png" alt="Cover plate for a removed Cat Mate cat flap" width="640">
+</p>
+
+The cat flap cover ([examples/cat_flap_cover.py](examples/cat_flap_cover.py)) was sized from two phone photos with a tape measure: the moulded logo identified the Cat Mate 4-way, the tape confirmed its 192 x 200mm frame, and the spec sheet gave the 165 x 174mm cut-out hidden behind it. It sticks on with VHB tape, and a hollow ribbed plug drops into the hole to centre it and take sideways knocks.
+
+<p align="center">
+  <img src="docs/desk_cable_tray_preview.png" alt="Under-desk cable tray segment with socket joint" width="640">
+</p>
+
+The under-desk cable tray ([examples/desk_cable_tray.py](examples/desk_cable_tray.py)) is 400mm long, too long for a 256mm bed, so it prints as identical segments that slide into each other. The script places two segments together and asserts they neither collide nor rattle before exporting.
+
+<p align="center">
   <img src="docs/magnet_catch_preview.png" alt="Magnetic door catch (frame side)" width="640">
   <img src="docs/magnet_strike_preview.png" alt="Magnetic door catch (door side)" width="640">
 </p>
@@ -66,10 +78,11 @@ pip install -r requirements.txt
 |------|---------|
 | `SKILL.md` | Skill definition and workflow instructions for Claude |
 | `gridfinity.py` | Tested Gridfinity bin generator (base profile, stacking lip, magnets, compartments, custom pockets). Vendored next to generated scripts. |
+| `mating.py` | Fit check for parts that go together: no collision when assembled, and the joint locates instead of rattling. Vendored next to generated scripts. |
 | `outline_from_scan.py` | Extracts a pocket outline from a 3D scan of an object (align, scale, slice, union), ready for `add_polygon_pocket`. |
-| `examples/` | Model scripts built on the gridfinity module (D110 cradle, MX Master 3 diagonal bin). |
+| `examples/` | Example model scripts: Gridfinity bins (D110 cradle, MX Master 3 diagonal bin), cat flap cover plate, segmented desk cable tray. |
 | `preview.py` | Headless STL to 6-view PNG renderer (trimesh + pyrender). Use `--strict` to fail on non-watertight meshes. |
-| `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, and emits a JSON result so Claude can self-correct in a loop. |
+| `run_cadquery_model.py` | Subprocess wrapper that runs a CadQuery script, captures errors, optionally renders the preview, checks each part against the printer's build volume (`--bed a1`), and emits a JSON result so Claude can self-correct in a loop. |
 | `mesh_io.py` | STL loading with validation (no pyrender dependency). Used by the wrapper and converter. |
 | `stl_to_3mf.py` | Standalone STL to 3MF converter for Bambu Studio / PrusaSlicer. |
 | `design-review.md` | Visual inspection checklist and printability analysis |

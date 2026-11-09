@@ -8,6 +8,7 @@ Usage:
     python3 run_cadquery_model.py path/to/model.py
     python3 run_cadquery_model.py path/to/model.py --preview            # also render
     python3 run_cadquery_model.py path/to/model.py --preview --strict   # fail on non-watertight
+    python3 run_cadquery_model.py path/to/model.py --bed a1             # fail if it won't fit the printer
 
 3MF and STEP files produced by the script (via cq.exporters.export(result,
 "name.3mf") / cq.exporters.export(result, "name.step")) are discovered
@@ -26,6 +27,8 @@ Emits a single JSON object to stdout (key order matches the emitted JSON):
       "steps": ["a.step", "b.step"],        # every .step produced by the script
       "step": "a.step",                     # newest, for single-file convenience
       "watertight": true/false/null,        # true only if ALL meshes are watertight
+      "bboxes": [[x, y, z], ...],           # mm, one per STL (after --preview/--strict/--bed)
+      "fits_bed": true/false/null,          # null unless --bed is set
       "stdout": "...",
       "stderr": "...",
       "returncode": 0,                      # -1 on timeout / spawn failure
@@ -33,8 +36,10 @@ Emits a single JSON object to stdout (key order matches the emitted JSON):
 
 Exit codes:
     0  success
-    1  CadQuery script failed, preview failed, or --strict rejected output
-    2  interpreter / script path could not be launched
+    1  CadQuery script failed, preview failed, --strict rejected output,
+       or a part does not fit the --bed build volume
+    2  interpreter / script path could not be launched, or bad arguments
+       (e.g. an unknown --bed printer)
     3  subprocess timed out
 """
 import argparse
@@ -85,7 +90,7 @@ def _new_files_by_ext(script_dir, after_mtime, exts):
     }
 
 
-def _process_stls(stls, views, strict, want_preview):
+def _process_stls(stls, views, strict, want_preview, bed=None):
     """Load each STL once and optionally render a preview + check watertightness.
 
     Single pass so an STL is never loaded twice when both outputs are
@@ -96,48 +101,80 @@ def _process_stls(stls, views, strict, want_preview):
     is imported only inside the rendering branch so that --strict by itself
     stays headless-safe (no pyrender / PyOpenGL required).
 
-    Returns a dict with previews, watertights (lists), and error (str or None).
-    The caller surfaces the error into result["stderr"].
+    With `bed` (an (x, y, z) build volume), every STL must fit it. Each
+    part is its own print, so they are checked one by one; a misfit still
+    gets its preview, and every misfit is listed in the error.
+
+    A failure on one STL does not stop the others: every STL is loaded,
+    measured and bed-checked, so one run reports every problem at once.
+
+    Returns a dict with previews, watertights, bboxes (lists), fits_bed
+    (bool or None, None when a part could not be measured) and error
+    (str or None, all problems joined). The caller surfaces the error
+    into result["stderr"].
     """
     import mesh_io  # trimesh + numpy only
 
-    out = {"previews": [], "watertights": [], "error": None}
+    out = {"previews": [], "watertights": [], "bboxes": [],
+           "fits_bed": None, "error": None}
+    errors, misfits = [], []
+    unmeasured = False
 
     for stl in stls:
         try:
             tm = mesh_io.load_mesh(stl)
         except ValueError as e:
-            out["error"] = f"Mesh load failed ({stl}): {e}"
-            return out
+            errors.append(f"Mesh load failed ({stl}): {e}")
+            unmeasured = True
+            continue
 
         watertight = bool(tm.is_watertight)
         out["watertights"].append(watertight)
+        extents = tm.bounding_box.extents
+        out["bboxes"].append([round(float(v), 2) for v in extents])
+
+        if bed is not None:
+            fits, msg = mesh_io.bed_fit(extents, bed)
+            if not fits:
+                misfits.append(f"{os.path.basename(stl)}: {msg}")
 
         if strict and not watertight:
-            out["error"] = f"Mesh {stl} is not watertight (--strict set)."
-            return out
+            errors.append(f"Mesh {stl} is not watertight (--strict set).")
+            continue  # no preview of a mesh --strict rejects
 
         if want_preview:
             import preview  # heavy: trimesh + pyrender, only here
             preview_path = _sibling(stl, "_preview.png")
+            title = preview.title_from_path(stl)
             try:
                 if views == "multi":
-                    preview.render_multi_view(tm, preview_path)
+                    preview.render_multi_view(tm, preview_path, title)
                 else:
-                    preview.render_single(tm, preview_path)
+                    preview.render_single(tm, preview_path, title)
             except Exception as e:
-                out["error"] = f"Preview render failed ({stl}): {e}"
-                return out
+                errors.append(f"Preview render failed ({stl}): {e}")
+                continue
             out["previews"].append(preview_path)
 
+    if bed is not None:
+        if misfits:
+            out["fits_bed"] = False
+            errors.append(
+                "Does not fit the bed: " + "; ".join(misfits) + ". Rotate "
+                "the geometry in the script, shrink it, or split it into "
+                "parts that join after printing."
+            )
+        elif not unmeasured:
+            out["fits_bed"] = True
+    out["error"] = "\n".join(errors) or None
     return out
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Run a CadQuery model script and report a JSON result",
-        epilog="Exit codes: 0 success, 1 script/preview/--strict failure, "
-               "2 interpreter not launchable, 3 timeout.",
+        epilog="Exit codes: 0 success, 1 script/preview/--strict/--bed failure, "
+               "2 interpreter not launchable or bad arguments, 3 timeout.",
     )
     parser.add_argument("script", help="Path to the CadQuery .py file")
     parser.add_argument("--preview", action="store_true",
@@ -147,9 +184,20 @@ def main():
                              "or if the script produced no STL at all")
     parser.add_argument("--views", choices=["iso", "multi"], default="multi",
                         help="Preview layout: 'iso' (single isometric) or 'multi' (6-view) (default: multi)")
+    parser.add_argument("--bed", default=None, metavar="PRINTER|WxDxH",
+                        help="Fail if any STL exceeds this build volume, e.g. 'a1', "
+                             "'mk4' or '256x256x256' (5 mm kept free per side)")
     parser.add_argument("--timeout", type=int, default=180,
                         help="Seconds before killing the model script (default: 180)")
     args = parser.parse_args()
+
+    bed = None
+    if args.bed is not None:
+        import mesh_io
+        try:
+            bed = mesh_io.parse_bed(args.bed)
+        except ValueError as e:
+            parser.error(str(e))
 
     script_path = os.path.abspath(args.script)
     script_dir = os.path.dirname(script_path) or "."
@@ -166,6 +214,8 @@ def main():
         "steps": [],
         "step": None,
         "watertight": None,
+        "bboxes": [],
+        "fits_bed": None,
         "stdout": "",
         "stderr": "",
         "returncode": -1,
@@ -206,17 +256,20 @@ def main():
     # --strict implies the run must produce at least one STL. A script that
     # exits 0 but forgot to call cq.exporters.export() would otherwise slip
     # through with an empty stls list and a null watertight claim.
-    if args.strict and result["success"] and not result["stls"]:
-        _append_stderr(result, "No STL files produced by the script (--strict set).")
+    if (args.strict or bed is not None) and result["success"] and not result["stls"]:
+        flag = "--strict" if args.strict else "--bed"
+        _append_stderr(result, f"No STL files produced by the script ({flag} set).")
         result["success"] = False
 
-    needs_mesh_pass = args.preview or args.strict
+    needs_mesh_pass = args.preview or args.strict or bed is not None
     if needs_mesh_pass and result["success"] and result["stls"]:
         processed = _process_stls(
             result["stls"], args.views, args.strict,
-            want_preview=args.preview,
+            want_preview=args.preview, bed=bed,
         )
         result["previews"] = processed["previews"]
+        result["bboxes"] = processed["bboxes"]
+        result["fits_bed"] = processed["fits_bed"]
         if processed["watertights"]:
             result["watertight"] = all(processed["watertights"])
         if processed["error"]:

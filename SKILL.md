@@ -60,6 +60,15 @@ When designing objects that interface with real products (phones, chargers, PCBs
 
 This is especially important for: phone cases/stands, charger mounts, PCB enclosures, cable management, adapter fittings, and anything that clips onto or wraps around an existing product.
 
+### Measuring from photos
+
+When the thing to fit is in the user's home (a hole, a frame, a pipe), ask for a photo with a tape measure laid across it, one per axis. A photo often answers more than the number:
+
+- **Read the tape where the object ends**, not where the hook sits. The hook is zero; check the hook is actually on the object's edge.
+- **Read the brand and model off the object** (moulded logos, labels). A product that matches the measured size gives you the spec sheet values for hidden dimensions, like the cut-out behind a frame. Use the measurement to confirm the model, and the spec for what the tape can't reach.
+- **Look at the surroundings**: distance to a floor, hinge or wall, paint shadows of an older fitting, existing screw holes. They bound how far the part can extend.
+- **Ask for the one measurement only the user can take** (the hole once the old part is off, a door thickness) and keep that dimension a named parameter so it can be corrected before printing.
+
 ## Core Workflow
 
 1. **Gather requirements** (see Requirements Gathering below)
@@ -85,7 +94,7 @@ Must-fit measurements, like PCB size, phone width, screw spacing, diameter of th
 How does it connect to things? Screws (what size?), snap-fit, adhesive tape, magnets, freestanding on a desk? This affects wall thickness, boss placement, and overall structure.
 
 **Printer & material**
-What printer do they have? (Bambu, Prusa, Ender, etc.) Nozzle size? Material (PLA, PETG, TPU)? This directly affects tolerances, minimum feature sizes, and design constraints. Defaults: 0.4mm nozzle, PLA, 0.2mm layer height.
+What printer do they have? (Bambu, Prusa, Ender, etc.) Nozzle size? Material (PLA, PETG, TPU)? This directly affects tolerances, minimum feature sizes, and design constraints. Defaults: 0.4mm nozzle, PLA, 0.2mm layer height. The printer also sets the **build volume**: pass it to the run wrapper with `--bed` (see below) as soon as the part is larger than about 150mm, so an oversized part fails in the loop instead of in the slicer.
 
 **Functional needs**
 Ventilation/airflow, water resistance, cable routing, access panels, visibility windows, stacking, weight limits. Ask only what's relevant to the object.
@@ -95,6 +104,8 @@ Rounded vs sharp edges, minimal vs industrial look, color considerations (affect
 
 Start with the first two (what + dimensions), then ask about mounting and material if relevant. Only ask about aesthetics if the user seems to care or if it affects structural choices.
 
+When a question tool is available, ask the questions that change the design in one batch, each with the typical answers as options (common product sizes from your research, the usual mounting methods). Users answer a list of concrete options faster than open questions, and "Other" still lets them type a measurement.
+
 ## Progressive Preview Workflow
 
 Build the model in phases. At each phase, export an STL, render a preview, self-review it, then **show it to the user and ask for feedback** before proceeding. This catches problems early and keeps the user involved.
@@ -103,9 +114,9 @@ Build the model in phases. At each phase, export an STL, render a preview, self-
 
 **One-shot (run script + render + parse result as JSON):**
 ```bash
-python3 run_cadquery_model.py model.py --preview --strict
+python3 run_cadquery_model.py model.py --preview --strict --bed a1
 ```
-This executes `model.py`, finds the STL it wrote, renders the multi-view preview, and emits a JSON result with `success`, `stdout`, `stderr`, `stl`, `preview`, and `watertight`. With `--strict`, a non-watertight mesh is a hard failure. Use this as the default loop: if `success` is false, read the `stderr` field to fix the CadQuery script, then re-run.
+This executes `model.py`, finds the STL it wrote, renders the multi-view preview, and emits a JSON result with `success`, `stdout`, `stderr`, `stl`, `preview`, `watertight`, `bboxes` (measured X/Y/Z of each STL, in mm) and `fits_bed`. With `--strict`, a non-watertight mesh is a hard failure. With `--bed`, a part that does not fit the build volume (90° rotation allowed, 5mm kept free per side) is a hard failure; it takes a printer name (`a1`, `a1mini`, `p1s`, `x1c`, `h2d`, `mk4`, `mini`, `core1`, `ender3`, `k1`, full list in `mesh_io.PRINTER_BEDS`) or `WxDxH` in mm. Use this as the default loop: if `success` is false, read the `stderr` field to fix the CadQuery script, then re-run. Compare `bboxes` with the dimensions you meant to build.
 
 **Rendering only (when the STL already exists):**
 ```bash
@@ -163,6 +174,7 @@ When you deliver the final STL, always include a one-line slicer recipe plus a s
 - **Load-bearing brackets / hooks / hinges**: bump infill to 25-40%, 3-4 walls, consider PETG over PLA for toughness.
 - **Thin decorative walls or vases**: 0 infill, vase mode or 1 wall.
 - **Tall narrow parts**: add a brim for bed adhesion.
+- **Large flat parts (plates, panels over ~150mm)**: corners lift as PLA cools. Brim or mouse ears, PETG if the room is cold, and stiffen with ribs instead of a thicker plate (a thick solid plate warps harder and costs more filament).
 - **Flexible parts (gaskets, grips)**: TPU 95A, 0.2mm layer, slower speed, no supports.
 - **Functional overhangs the geometry can't avoid**: tree supports, or call them out so the user knows.
 - **Outdoor / hot environments**: PETG or ASA, not PLA.
@@ -292,6 +304,12 @@ result = outer.cut(inner)
 .slot2D(slot_l, slot_w).cutThruAll()
 ```
 
+**Adhesive-mounted cover or panel (VHB tape):**
+- Leave a flat, unbroken contact band at least 20mm wide where the tape goes; VHB rolls are 12, 19 or 25mm wide. No ribs, text or chamfers inside that band.
+- Tape holds well in peel and tension but creeps under a constant sideways load. When the part covers a hole, add a hollow **locating plug** on the back that drops into the hole with 1-1.5mm clearance per side: it centres the part while the tape is applied and takes any knock sideways. Keep its depth under half the substrate thickness if a twin part goes on the other side.
+- Print the visible face down on the bed for the smoothest finish, with a small chamfer on that edge (fillets on the bed edge need supports).
+- See `examples/cat_flap_cover.py`.
+
 Other patterns: mounting brackets, cable routing channels, text/labels (`.text()`), multi-part assemblies with alignment pins.
 
 ### Common Pitfalls
@@ -343,6 +361,28 @@ cq.exporters.export(lid, "enclosure_lid.stl")
 ```
 
 Name files descriptively so the user knows which part is which.
+
+**Check how the parts mate before printing them.** A preview shows each part alone, so it can't catch a lid that collides with its box or a joint too loose to hold. Copy the bundled `mating.py` next to the script, place the parts in their assembled position (don't export that) and call `check_mating`:
+
+```python
+from mating import check_mating
+
+# Raises MatingError if the lid collides with the box, or if a shift of
+# clearance + 0.1mm along X or Y doesn't hit anything (the lid rattles).
+check_mating(box, lid.translate((0, 0, box_h)), clearance=fit_clearance,
+             axes=("x", "y"))
+```
+
+List only the axes the joint itself must hold. Leave out an axis that screws, glue or gravity take care of.
+
+### Parts larger than the bed
+
+When `--bed` rejects a part, try in this order:
+1. **Rotate it** in the script (stand it on end, or turn it diagonally with `.rotate()`): the wrapper only tries the part as exported and turned 90°.
+2. **Split it into identical segments** where the shape repeats (trays, rails, shelves): one script, one STL, print it N times. Each segment should mount on its own so the joint only aligns; joints that carry load need screws or a dovetail.
+3. **Split at a natural seam** otherwise, and join with alignment pins (pin + hole with 0.2mm clearance) plus glue or screws.
+
+Put the joint where it prints without supports (vertical cheeks, butt ends), and run the mating check above on it. See `examples/desk_cable_tray.py`.
 
 ## Gridfinity Bins
 
@@ -415,5 +455,7 @@ Before delivering a model, verify:
 - [ ] Script runs without errors
 - [ ] **Multi-view preview generated and visually inspected**
 - [ ] **Preview shows correct shape, features, and proportions**
-- [ ] **Bounding box dimensions match requirements**
+- [ ] **Bounding box dimensions match requirements** (`bboxes` in the wrapper JSON)
+- [ ] Every part fits the user's printer (`--bed` passed)
+- [ ] Mating parts checked for collision and capture (multi-part only)
 - [ ] Both STL and preview PNG delivered to user
