@@ -46,7 +46,14 @@ Claude will then walk you through requirements, build the model in phases (base 
 
 ## Dependencies
 
-Requires **Python 3.10-3.12** (CadQuery's OCC kernel does not have wheels for 3.13+):
+Requires **Python 3.10-3.12** (CadQuery's OCC kernel does not have wheels for 3.13+). [uv](https://docs.astral.sh/uv/) fetches Python 3.12 for you if it is missing:
+
+```bash
+uv venv --python 3.12 && source .venv/bin/activate
+uv pip install -r requirements.txt
+```
+
+Without uv, with Python 3.10-3.12 already installed:
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
